@@ -382,10 +382,10 @@ fn playback_monitor(
 
         // Get real position from audio player
         let (pos_tx, pos_rx) = mpsc::channel();
-        if audio_tx.send(AudioCommand::GetPosition(pos_tx)).is_ok() {
-            if let Ok(pos) = pos_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                state.lock().unwrap().position = pos;
-            }
+        if audio_tx.send(AudioCommand::GetPosition(pos_tx)).is_ok()
+            && let Ok(pos) = pos_rx.recv_timeout(std::time::Duration::from_millis(100))
+        {
+            state.lock().unwrap().position = pos;
         }
 
         // Check if audio finished
