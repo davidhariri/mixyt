@@ -128,6 +128,11 @@ fn main() -> Result<()> {
             app.check()?;
         }
         Commands::Tui => {
+            // Ensure daemon is running for playback
+            let client = ipc::DaemonClient::new(app.config.socket_path());
+            if !client.is_daemon_running() {
+                daemon::Daemon::start_detached(&app.config)?;
+            }
             tui::run(app.config.clone(), app.db)?;
         }
     }
