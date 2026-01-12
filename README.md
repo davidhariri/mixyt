@@ -33,7 +33,3 @@ mixyt
 - `q` Quit
 
 For all CLI commands: `mixyt help`
-
-## License
-
-MIT
