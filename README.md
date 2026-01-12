@@ -2,6 +2,8 @@
 
 A CLI tool for saving, managing, and playing YouTube audio from the terminal.
 
+**macOS only** (Apple Silicon and Intel)
+
 ## Features
 
 - **Save audio** from YouTube URLs to a local library
@@ -19,14 +21,7 @@ A CLI tool for saving, managing, and playing YouTube audio from the terminal.
 You need `yt-dlp` and `ffmpeg` installed:
 
 ```bash
-# macOS
 brew install yt-dlp ffmpeg
-
-# Ubuntu/Debian
-sudo apt install yt-dlp ffmpeg
-
-# Arch
-pacman -S yt-dlp ffmpeg
 ```
 
 ### From source (recommended)

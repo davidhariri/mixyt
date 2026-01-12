@@ -96,61 +96,62 @@ impl Tui {
         result
     }
 
+    #[allow(clippy::collapsible_if)]
     fn main_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         loop {
             // Refresh playback state
-            if self.client.is_daemon_running()
-                && let Ok(state) = self.client.get_status()
-            {
-                self.playback_state = state;
+            if self.client.is_daemon_running() {
+                if let Ok(state) = self.client.get_status() {
+                    self.playback_state = state;
+                }
             }
 
             terminal.draw(|f| self.ui(f))?;
 
-            if event::poll(Duration::from_millis(250))?
-                && let Event::Key(key) = event::read()?
-            {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                if self.search_mode {
-                    match key.code {
-                        KeyCode::Esc => {
-                            self.search_mode = false;
-                            self.search_query.clear();
-                        }
-                        KeyCode::Enter => {
-                            self.search_mode = false;
-                            self.apply_search();
-                        }
-                        KeyCode::Backspace => {
-                            self.search_query.pop();
-                        }
-                        KeyCode::Char(c) => {
-                            self.search_query.push(c);
-                        }
-                        _ => {}
+            if event::poll(Duration::from_millis(250))? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
                     }
-                } else {
-                    match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('/') => {
-                            self.search_mode = true;
+                    if self.search_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                self.search_mode = false;
+                                self.search_query.clear();
+                            }
+                            KeyCode::Enter => {
+                                self.search_mode = false;
+                                self.apply_search();
+                            }
+                            KeyCode::Backspace => {
+                                self.search_query.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                self.search_query.push(c);
+                            }
+                            _ => {}
                         }
-                        KeyCode::Tab => self.next_panel(),
-                        KeyCode::BackTab => self.prev_panel(),
-                        KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
-                        KeyCode::Down | KeyCode::Char('j') => self.select_next(),
-                        KeyCode::Enter => self.play_selected(),
-                        KeyCode::Char(' ') => self.toggle_playback(),
-                        KeyCode::Char('n') => self.next_track(),
-                        KeyCode::Char('p') => self.prev_track(),
-                        KeyCode::Char('s') => self.toggle_shuffle(),
-                        KeyCode::Char('r') => self.cycle_repeat(),
-                        KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
-                        KeyCode::Char('-') => self.volume_down(),
-                        KeyCode::Char('a') => self.add_to_queue(),
-                        _ => {}
+                    } else {
+                        match key.code {
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('/') => {
+                                self.search_mode = true;
+                            }
+                            KeyCode::Tab => self.next_panel(),
+                            KeyCode::BackTab => self.prev_panel(),
+                            KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
+                            KeyCode::Down | KeyCode::Char('j') => self.select_next(),
+                            KeyCode::Enter => self.play_selected(),
+                            KeyCode::Char(' ') => self.toggle_playback(),
+                            KeyCode::Char('n') => self.next_track(),
+                            KeyCode::Char('p') => self.prev_track(),
+                            KeyCode::Char('s') => self.toggle_shuffle(),
+                            KeyCode::Char('r') => self.cycle_repeat(),
+                            KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
+                            KeyCode::Char('-') => self.volume_down(),
+                            KeyCode::Char('a') => self.add_to_queue(),
+                            _ => {}
+                        }
                     }
                 }
             }

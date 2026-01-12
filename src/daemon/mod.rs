@@ -12,11 +12,8 @@ use crate::config::Config;
 use crate::ipc::{DaemonCommand, DaemonResponse};
 use crate::models::{PlaybackState, RepeatMode, Track};
 
-// Media key support is platform-specific and requires additional setup
-// Placeholder modules exist but are not spawned by default
+// Media key support for macOS
 #[cfg(target_os = "macos")]
-mod mediakeys;
-#[cfg(target_os = "linux")]
 mod mediakeys;
 
 // Internal commands for the audio thread
