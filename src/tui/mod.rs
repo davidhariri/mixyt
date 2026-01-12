@@ -356,10 +356,7 @@ impl Tui {
             )
         } else if self.add_mode {
             (
-                format!(
-                    " Add URL: {}▌  (Enter to add, Esc to cancel)",
-                    self.add_url
-                ),
+                format!(" Add URL: {}▌  (Enter to add, Esc to cancel)", self.add_url),
                 Style::default().fg(Color::DarkGray),
             )
         } else if let Some(ref msg) = self.status_message {
@@ -488,10 +485,7 @@ impl Tui {
         self.edit_text.clear();
     }
 
-    fn add_track(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    ) -> Result<()> {
+    fn add_track(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         let url = self.add_url.trim().to_string();
         self.add_url.clear();
 

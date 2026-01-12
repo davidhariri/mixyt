@@ -205,27 +205,25 @@ fn init_media_controls(
     let tx = audio_tx.clone();
 
     controls
-        .attach(move |event: MediaControlEvent| {
-            match event {
-                MediaControlEvent::Play => {
+        .attach(move |event: MediaControlEvent| match event {
+            MediaControlEvent::Play => {
+                let _ = tx.send(AudioCommand::Resume);
+            }
+            MediaControlEvent::Pause => {
+                let _ = tx.send(AudioCommand::Pause);
+            }
+            MediaControlEvent::Toggle => {
+                let is_playing = state_clone.lock().unwrap().is_playing;
+                if is_playing {
+                    let _ = tx.send(AudioCommand::Pause);
+                } else {
                     let _ = tx.send(AudioCommand::Resume);
                 }
-                MediaControlEvent::Pause => {
-                    let _ = tx.send(AudioCommand::Pause);
-                }
-                MediaControlEvent::Toggle => {
-                    let is_playing = state_clone.lock().unwrap().is_playing;
-                    if is_playing {
-                        let _ = tx.send(AudioCommand::Pause);
-                    } else {
-                        let _ = tx.send(AudioCommand::Resume);
-                    }
-                }
-                MediaControlEvent::Stop => {
-                    let _ = tx.send(AudioCommand::Stop);
-                }
-                _ => {}
             }
+            MediaControlEvent::Stop => {
+                let _ = tx.send(AudioCommand::Stop);
+            }
+            _ => {}
         })
         .ok()?;
 

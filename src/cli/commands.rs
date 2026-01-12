@@ -103,7 +103,10 @@ impl App {
         // Check if already in library by canonical URL
         if let Some(existing) = self.db.get_track_by_url(&canonical_url)? {
             println!("Track already in library: {}", existing.display_name());
-            println!("Use 'mixyt remove \"{}\"' first if you want to re-add it.", title);
+            println!(
+                "Use 'mixyt remove \"{}\"' first if you want to re-add it.",
+                title
+            );
             return Ok(());
         }
 
