@@ -1,0 +1,147 @@
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    pub storage: StorageConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
+    #[serde(default)]
+    pub playback: PlaybackConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            storage: StorageConfig::default(),
+            audio: AudioConfig::default(),
+            daemon: DaemonConfig::default(),
+            playback: PlaybackConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageConfig {
+    pub path: PathBuf,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Self {
+            path: home.join(".mixyt"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    pub format: String,
+    pub quality: String,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            format: "opus".to_string(),
+            quality: "best".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    pub auto_start: bool,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self { auto_start: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackConfig {
+    pub default_volume: u8,
+}
+
+impl Default for PlaybackConfig {
+    fn default() -> Self {
+        Self { default_volume: 80 }
+    }
+}
+
+impl Config {
+    pub fn config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mixyt")
+    }
+
+    pub fn config_path() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    pub fn load() -> Result<Self> {
+        let config_path = Self::config_path();
+
+        if config_path.exists() {
+            let content = fs::read_to_string(&config_path)
+                .with_context(|| format!("Failed to read config from {}", config_path.display()))?;
+            let config: Config = toml::from_str(&content)
+                .with_context(|| "Failed to parse config file")?;
+            Ok(config)
+        } else {
+            Ok(Config::default())
+        }
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let config_dir = Self::config_dir();
+        fs::create_dir_all(&config_dir)
+            .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+
+        let config_path = Self::config_path();
+        let content = toml::to_string_pretty(self)
+            .with_context(|| "Failed to serialize config")?;
+
+        fs::write(&config_path, content)
+            .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
+
+        Ok(())
+    }
+
+    pub fn data_dir(&self) -> &PathBuf {
+        &self.storage.path
+    }
+
+    pub fn audio_dir(&self) -> PathBuf {
+        self.storage.path.join("audio")
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.storage.path.join("mixyt.db")
+    }
+
+    pub fn socket_path(&self) -> PathBuf {
+        self.storage.path.join("mixyt.sock")
+    }
+
+    pub fn pid_path(&self) -> PathBuf {
+        self.storage.path.join("mixyt.pid")
+    }
+
+    pub fn ensure_dirs(&self) -> Result<()> {
+        fs::create_dir_all(self.data_dir())
+            .with_context(|| format!("Failed to create data directory: {}", self.data_dir().display()))?;
+        fs::create_dir_all(self.audio_dir())
+            .with_context(|| format!("Failed to create audio directory: {}", self.audio_dir().display()))?;
+        Ok(())
+    }
+}
