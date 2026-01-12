@@ -38,7 +38,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            format: "opus".to_string(),
+            format: "mp3".to_string(),
             quality: "best".to_string(),
         }
     }

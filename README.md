@@ -143,7 +143,7 @@ Config file: `~/.config/mixyt/config.toml`
 path = "~/.mixyt"
 
 [audio]
-format = "opus"
+format = "mp3"
 quality = "best"
 
 [daemon]
