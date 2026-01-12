@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
 
-use crate::models::RepeatMode;
-
 mod commands;
 pub use commands::*;
 
@@ -46,13 +44,6 @@ pub enum Commands {
     /// Stop playback
     Stop,
 
-    /// Skip to the next track
-    Next,
-
-    /// Go to the previous track
-    #[command(name = "prev")]
-    Previous,
-
     /// Seek to a position (e.g., "1:30" or "90")
     Seek {
         /// Position in seconds or MM:SS format
@@ -66,40 +57,12 @@ pub enum Commands {
     },
 
     /// List tracks in the library
-    List {
-        /// Filter by playlist name
-        #[arg(short, long)]
-        playlist: Option<String>,
-    },
+    List,
 
     /// Search the library
     Search {
         /// Search query
         query: String,
-    },
-
-    /// Playlist management
-    Playlist {
-        #[command(subcommand)]
-        command: PlaylistCommands,
-    },
-
-    /// Queue management
-    Queue {
-        #[command(subcommand)]
-        command: QueueCommands,
-    },
-
-    /// Toggle or set shuffle mode
-    Shuffle {
-        /// on or off
-        mode: Option<String>,
-    },
-
-    /// Set repeat mode
-    Repeat {
-        /// off, one, or all
-        mode: Option<RepeatMode>,
     },
 
     /// Show current playback status
@@ -130,62 +93,6 @@ pub enum Commands {
     /// Launch interactive TUI
     #[command(name = "tui")]
     Tui,
-}
-
-#[derive(Subcommand)]
-pub enum PlaylistCommands {
-    /// Create a new playlist
-    Create {
-        /// Playlist name
-        name: String,
-    },
-    /// Add a track to a playlist
-    Add {
-        /// Playlist name
-        playlist: String,
-        /// Track query
-        query: String,
-    },
-    /// Remove a track from a playlist
-    Remove {
-        /// Playlist name
-        playlist: String,
-        /// Track query
-        query: String,
-    },
-    /// Delete a playlist
-    Delete {
-        /// Playlist name
-        name: String,
-    },
-    /// List all playlists
-    List,
-    /// Show tracks in a playlist
-    Show {
-        /// Playlist name
-        name: String,
-    },
-    /// Play a playlist
-    Play {
-        /// Playlist name
-        name: String,
-        /// Start with shuffle
-        #[arg(short, long)]
-        shuffle: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum QueueCommands {
-    /// Add a track to the queue
-    Add {
-        /// Track query
-        query: String,
-    },
-    /// Show the current queue
-    List,
-    /// Clear the queue
-    Clear,
 }
 
 #[derive(Subcommand)]

@@ -7,11 +7,11 @@ A CLI tool for saving, managing, and playing YouTube audio from the terminal.
 ## Features
 
 - **Save audio** from YouTube URLs to a local library
-- **Organize** with playlists and custom aliases
+- **Rename tracks** with custom aliases
 - **Fuzzy search** to find tracks quickly
 - **Background playback** via daemon - keeps playing while you work
-- **Queue management** with shuffle and repeat modes
-- **Interactive TUI** for visual browsing
+- **Media keys** - control playback from anywhere with system media keys
+- **Interactive TUI** for visual browsing and adding tracks
 - **Export/import** your library as JSON
 
 ## Installation
@@ -65,34 +65,9 @@ mixyt play <query>    # Play a track
 mixyt pause           # Pause playback
 mixyt resume          # Resume playback
 mixyt stop            # Stop playback
-mixyt next            # Next track
-mixyt prev            # Previous track
 mixyt seek 1:30       # Seek to position (MM:SS or seconds)
 mixyt volume 80       # Set volume (0-100)
 mixyt status          # Show current status
-```
-
-### Playlists
-
-```bash
-mixyt playlist create <name>              # Create a playlist
-mixyt playlist add <playlist> <query>     # Add track to playlist
-mixyt playlist remove <playlist> <query>  # Remove track from playlist
-mixyt playlist delete <name>              # Delete a playlist
-mixyt playlist list                       # List all playlists
-mixyt playlist show <name>                # Show tracks in playlist
-mixyt playlist play <name>                # Play a playlist
-mixyt playlist play <name> --shuffle      # Play shuffled
-```
-
-### Queue & Modes
-
-```bash
-mixyt queue add <query>   # Add to queue
-mixyt queue list          # Show queue
-mixyt queue clear         # Clear queue
-mixyt shuffle [on|off]    # Toggle shuffle
-mixyt repeat [off|one|all] # Set repeat mode
 ```
 
 ### Daemon
@@ -115,21 +90,21 @@ mixyt import backup.json          # Import library
 ### Interactive TUI
 
 ```bash
-mixyt tui
+mixyt      # TUI is the default
+mixyt tui  # Or explicitly
 ```
 
 **Keyboard shortcuts:**
 - `q` - Quit
-- `Tab` - Switch panels
 - `j/k` or arrows - Navigate
-- `Enter` - Play selected
-- `Space` - Pause/resume
-- `n/p` - Next/previous
-- `s` - Toggle shuffle
-- `r` - Cycle repeat
-- `+/-` - Volume
+- `Enter` or `Space` - Play selected track (or pause/resume if playing)
+- `+/-` - Volume up/down
 - `/` - Search
-- `a` - Add to queue
+- `a` - Add track (paste YouTube URL)
+- `e` - Edit (rename) selected track
+
+**Media keys:**
+Use your keyboard's play/pause media keys to control playback from any app.
 
 ## Configuration
 

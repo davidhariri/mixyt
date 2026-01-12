@@ -237,6 +237,7 @@ impl Database {
         Ok(playlists)
     }
 
+    #[allow(dead_code)]
     pub fn delete_playlist(&self, id: &Uuid) -> Result<()> {
         self.conn
             .execute("DELETE FROM playlists WHERE id = ?1", [id.to_string()])?;
@@ -244,6 +245,7 @@ impl Database {
     }
 
     // Playlist track operations
+    #[allow(dead_code)]
     pub fn add_track_to_playlist(&self, playlist_id: &Uuid, track_id: &Uuid) -> Result<()> {
         let position: i32 = self.conn.query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
@@ -259,6 +261,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn remove_track_from_playlist(&self, playlist_id: &Uuid, track_id: &Uuid) -> Result<()> {
         self.conn.execute(
             "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
@@ -267,6 +270,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_playlist_tracks(&self, playlist_id: &Uuid) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.url, t.title, t.alias, t.duration, t.added_at, t.file_path, t.available
@@ -311,6 +315,7 @@ impl Database {
         Ok(count as usize)
     }
 
+    #[allow(dead_code)]
     pub fn get_playlist_track_count(&self, playlist_id: &Uuid) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1",

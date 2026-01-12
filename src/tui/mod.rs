@@ -17,28 +17,24 @@ use std::time::Duration;
 
 use crate::config::Config;
 use crate::db::Database;
+use crate::download::Downloader;
 use crate::ipc::DaemonClient;
 use crate::models::{PlaybackState, Track};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Panel {
-    Library,
-    Queue,
-}
-
 pub struct Tui {
-    #[allow(dead_code)]
     config: Config,
-    #[allow(dead_code)]
     db: Database,
     client: DaemonClient,
     tracks: Vec<Track>,
-    selected_panel: Panel,
     library_state: ListState,
-    queue_state: ListState,
     playback_state: PlaybackState,
     search_query: String,
     search_mode: bool,
+    edit_mode: bool,
+    edit_text: String,
+    add_mode: bool,
+    add_url: String,
+    status_message: Option<String>,
 }
 
 impl Tui {
@@ -62,12 +58,15 @@ impl Tui {
             db,
             client,
             tracks,
-            selected_panel: Panel::Library,
             library_state,
-            queue_state: ListState::default(),
             playback_state,
             search_query: String::new(),
             search_mode: false,
+            edit_mode: false,
+            edit_text: String::new(),
+            add_mode: false,
+            add_url: String::new(),
+            status_message: None,
         })
     }
 
@@ -126,25 +125,60 @@ impl Tui {
                             }
                             _ => {}
                         }
+                    } else if self.edit_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                self.edit_mode = false;
+                                self.edit_text.clear();
+                            }
+                            KeyCode::Enter => {
+                                self.edit_mode = false;
+                                self.apply_edit();
+                            }
+                            KeyCode::Backspace => {
+                                self.edit_text.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                self.edit_text.push(c);
+                            }
+                            _ => {}
+                        }
+                    } else if self.add_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                self.add_mode = false;
+                                self.add_url.clear();
+                            }
+                            KeyCode::Enter => {
+                                self.add_mode = false;
+                                self.add_track();
+                            }
+                            KeyCode::Backspace => {
+                                self.add_url.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                self.add_url.push(c);
+                            }
+                            _ => {}
+                        }
                     } else {
+                        // Clear status message on any key press
+                        self.status_message = None;
                         match key.code {
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Char('/') => {
                                 self.search_mode = true;
                             }
-                            KeyCode::Tab => self.next_panel(),
-                            KeyCode::BackTab => self.prev_panel(),
+                            KeyCode::Char('e') => self.start_edit(),
+                            KeyCode::Char('a') => {
+                                self.add_mode = true;
+                            }
                             KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
                             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
                             KeyCode::Enter => self.play_selected(),
-                            KeyCode::Char(' ') => self.toggle_playback(),
-                            KeyCode::Char('n') => self.next_track(),
-                            KeyCode::Char('p') => self.prev_track(),
-                            KeyCode::Char('s') => self.toggle_shuffle(),
-                            KeyCode::Char('r') => self.cycle_repeat(),
+                            KeyCode::Char(' ') => self.toggle_or_play(),
                             KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
                             KeyCode::Char('-') => self.volume_down(),
-                            KeyCode::Char('a') => self.add_to_queue(),
                             _ => {}
                         }
                     }
@@ -227,20 +261,8 @@ impl Tui {
             let current_time = Self::format_time(self.playback_state.position);
             let total_time = Self::format_time(track.duration);
 
-            let shuffle_icon = if self.playback_state.shuffle {
-                "⤮ "
-            } else {
-                ""
-            };
-            let repeat_icon = match self.playback_state.repeat {
-                crate::models::RepeatMode::Off => "",
-                crate::models::RepeatMode::One => "⟲₁",
-                crate::models::RepeatMode::All => "⟲ ",
-            };
-
             let time_line = Line::from(vec![
                 Span::raw(format!("{}  ", current_time)),
-                Span::styled("◀◀ ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     if self.playback_state.is_playing {
                         "⏸"
@@ -249,28 +271,8 @@ impl Tui {
                     },
                     Style::default().fg(Color::Cyan),
                 ),
-                Span::styled(" ▶▶", Style::default().fg(Color::DarkGray)),
                 Span::raw(format!("  {}", total_time)),
-                Span::raw("    "),
-                Span::styled(
-                    shuffle_icon,
-                    Style::default().fg(if self.playback_state.shuffle {
-                        Color::Cyan
-                    } else {
-                        Color::DarkGray
-                    }),
-                ),
-                Span::styled(
-                    repeat_icon,
-                    Style::default().fg(
-                        if self.playback_state.repeat != crate::models::RepeatMode::Off {
-                            Color::Cyan
-                        } else {
-                            Color::DarkGray
-                        },
-                    ),
-                ),
-                Span::raw(format!("  Vol: {}%", self.playback_state.volume)),
+                Span::raw(format!("    Vol: {}%", self.playback_state.volume)),
             ]);
 
             let time_para = Paragraph::new(time_line).alignment(Alignment::Center);
@@ -291,20 +293,11 @@ impl Tui {
     }
 
     fn render_main_content(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-            .split(area);
-
-        // Library
+        // Library only
         let library_block = Block::default()
             .title(format!(" Library ({}) ", self.tracks.len()))
             .borders(Borders::ALL)
-            .border_style(if self.selected_panel == Panel::Library {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            });
+            .border_style(Style::default().fg(Color::Cyan));
 
         let items: Vec<ListItem> = self
             .tracks
@@ -341,103 +334,68 @@ impl Tui {
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             .highlight_symbol("▸ ");
 
-        f.render_stateful_widget(list, chunks[0], &mut self.library_state.clone());
-
-        // Queue
-        let queue_block = Block::default()
-            .title(format!(" Queue ({}) ", self.playback_state.queue.len()))
-            .borders(Borders::ALL)
-            .border_style(if self.selected_panel == Panel::Queue {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            });
-
-        let queue_items: Vec<ListItem> = self
-            .playback_state
-            .queue
-            .iter()
-            .enumerate()
-            .map(|(i, t)| {
-                let is_current = i == self.playback_state.queue_index;
-                let style = if is_current {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                };
-                let marker = if is_current { "▶ " } else { "  " };
-                ListItem::new(format!("{}{}", marker, t.display_name())).style(style)
-            })
-            .collect();
-
-        let queue_list = List::new(queue_items)
-            .block(queue_block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-
-        f.render_stateful_widget(queue_list, chunks[1], &mut self.queue_state.clone());
+        f.render_stateful_widget(list, area, &mut self.library_state.clone());
     }
 
     fn render_help(&self, f: &mut Frame, area: Rect) {
-        let help_text = if self.search_mode {
-            format!(
-                " Search: {}▌  (Enter to search, Esc to cancel)",
-                self.search_query
+        let (help_text, style) = if self.search_mode {
+            (
+                format!(
+                    " Search: {}▌  (Enter to search, Esc to cancel)",
+                    self.search_query
+                ),
+                Style::default().fg(Color::DarkGray),
             )
+        } else if self.edit_mode {
+            (
+                format!(
+                    " Rename: {}▌  (Enter to save, Esc to cancel)",
+                    self.edit_text
+                ),
+                Style::default().fg(Color::DarkGray),
+            )
+        } else if self.add_mode {
+            (
+                format!(
+                    " Add URL: {}▌  (Enter to add, Esc to cancel)",
+                    self.add_url
+                ),
+                Style::default().fg(Color::DarkGray),
+            )
+        } else if let Some(ref msg) = self.status_message {
+            (format!(" {}", msg), Style::default().fg(Color::Yellow))
         } else {
-            " q:Quit  /:Search  Tab:Panel  ↑↓:Navigate  Enter:Play  Space:Pause  n/p:Skip  s:Shuffle  r:Repeat  +/-:Vol  a:Queue".to_string()
+            (
+                " q:Quit  /:Search  a:Add  e:Edit  ↑↓:Navigate  Enter/Space:Play  +/-:Vol"
+                    .to_string(),
+                Style::default().fg(Color::DarkGray),
+            )
         };
 
-        let help = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray));
+        let help = Paragraph::new(help_text).style(style);
         f.render_widget(help, area);
     }
 
-    fn next_panel(&mut self) {
-        self.selected_panel = match self.selected_panel {
-            Panel::Library => Panel::Queue,
-            Panel::Queue => Panel::Library,
-        };
-    }
-
-    fn prev_panel(&mut self) {
-        self.next_panel(); // Only two panels now
-    }
-
-    fn current_list_state(&mut self) -> &mut ListState {
-        match self.selected_panel {
-            Panel::Library => &mut self.library_state,
-            Panel::Queue => &mut self.queue_state,
-        }
-    }
-
-    fn current_list_len(&self) -> usize {
-        match self.selected_panel {
-            Panel::Library => self.tracks.len(),
-            Panel::Queue => self.playback_state.queue.len(),
-        }
-    }
-
     fn select_next(&mut self) {
-        let len = self.current_list_len();
+        let len = self.tracks.len();
         if len == 0 {
             return;
         }
 
-        let state = self.current_list_state();
-        let i = match state.selected() {
+        let i = match self.library_state.selected() {
             Some(i) => (i + 1) % len,
             None => 0,
         };
-        state.select(Some(i));
+        self.library_state.select(Some(i));
     }
 
     fn select_prev(&mut self) {
-        let len = self.current_list_len();
+        let len = self.tracks.len();
         if len == 0 {
             return;
         }
 
-        let state = self.current_list_state();
-        let i = match state.selected() {
+        let i = match self.library_state.selected() {
             Some(i) => {
                 if i == 0 {
                     len - 1
@@ -447,14 +405,10 @@ impl Tui {
             }
             None => 0,
         };
-        state.select(Some(i));
+        self.library_state.select(Some(i));
     }
 
     fn play_selected(&mut self) {
-        if self.selected_panel != Panel::Library {
-            return;
-        }
-
         let Some(i) = self.library_state.selected() else {
             return;
         };
@@ -466,33 +420,18 @@ impl Tui {
         }
     }
 
-    fn toggle_playback(&mut self) {
-        if self.playback_state.is_playing {
-            let _ = self.client.pause();
+    fn toggle_or_play(&mut self) {
+        // If something is playing, toggle pause/resume
+        // If nothing is playing, play the selected track
+        if self.playback_state.current_track.is_some() {
+            if self.playback_state.is_playing {
+                let _ = self.client.pause();
+            } else {
+                let _ = self.client.resume();
+            }
         } else {
-            let _ = self.client.resume();
+            self.play_selected();
         }
-    }
-
-    fn next_track(&mut self) {
-        let _ = self.client.next();
-    }
-
-    fn prev_track(&mut self) {
-        let _ = self.client.previous();
-    }
-
-    fn toggle_shuffle(&mut self) {
-        let _ = self.client.set_shuffle(!self.playback_state.shuffle);
-    }
-
-    fn cycle_repeat(&mut self) {
-        let new_mode = match self.playback_state.repeat {
-            crate::models::RepeatMode::Off => crate::models::RepeatMode::All,
-            crate::models::RepeatMode::All => crate::models::RepeatMode::One,
-            crate::models::RepeatMode::One => crate::models::RepeatMode::Off,
-        };
-        let _ = self.client.set_repeat(new_mode);
     }
 
     fn volume_up(&mut self) {
@@ -505,16 +444,100 @@ impl Tui {
         let _ = self.client.set_volume(vol);
     }
 
-    fn add_to_queue(&mut self) {
-        if self.selected_panel != Panel::Library {
+    fn start_edit(&mut self) {
+        let Some(i) = self.library_state.selected() else {
+            return;
+        };
+        let Some(track) = self.tracks.get(i) else {
+            return;
+        };
+        // Pre-fill with current alias or title
+        self.edit_text = track.alias.clone().unwrap_or_else(|| track.title.clone());
+        self.edit_mode = true;
+    }
+
+    fn apply_edit(&mut self) {
+        if self.edit_text.is_empty() {
             return;
         }
 
         let Some(i) = self.library_state.selected() else {
+            self.edit_text.clear();
             return;
         };
-        if let Some(track) = self.tracks.get(i) {
-            let _ = self.client.queue_add(track.clone());
+        let Some(track) = self.tracks.get(i) else {
+            self.edit_text.clear();
+            return;
+        };
+
+        // Save the new alias to the database
+        let new_alias = self.edit_text.trim().to_string();
+        let alias = if new_alias == track.title {
+            None // Clear alias if it matches the title
+        } else {
+            Some(new_alias.as_str())
+        };
+
+        if self.db.update_track_alias(&track.id, alias).is_ok() {
+            // Update local track list
+            if let Some(t) = self.tracks.get_mut(i) {
+                t.alias = alias.map(|s| s.to_string());
+            }
+        }
+
+        self.edit_text.clear();
+    }
+
+    fn add_track(&mut self) {
+        let url = self.add_url.trim().to_string();
+        self.add_url.clear();
+
+        if url.is_empty() {
+            return;
+        }
+
+        // Check if it looks like a YouTube URL
+        if !url.contains("youtube.com") && !url.contains("youtu.be") {
+            self.status_message = Some("Invalid URL - must be a YouTube URL".to_string());
+            return;
+        }
+
+        self.status_message = Some("Downloading...".to_string());
+
+        // Download the track (this blocks the TUI briefly)
+        let downloader = Downloader::new(self.config.clone());
+
+        // First check if it already exists
+        match downloader.get_video_info(&url) {
+            Ok((title, canonical_url, _)) => {
+                if let Ok(Some(_)) = self.db.get_track_by_url(&canonical_url) {
+                    self.status_message = Some(format!("Already in library: {}", title));
+                    return;
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Error: {}", e));
+                return;
+            }
+        }
+
+        match downloader.download(&url) {
+            Ok(track) => {
+                if self.db.insert_track(&track).is_ok() {
+                    self.status_message = Some(format!("Added: {}", track.display_name()));
+                    // Refresh tracks list
+                    if let Ok(tracks) = self.db.get_all_tracks() {
+                        self.tracks = tracks;
+                        // Select the newly added track (it's at the top since sorted by added_at DESC)
+                        self.library_state.select(Some(0));
+                    }
+                } else {
+                    self.status_message = Some("Failed to save track".to_string());
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Download failed: {}", e));
+            }
         }
     }
 

@@ -47,6 +47,7 @@ pub struct Playlist {
 }
 
 impl Playlist {
+    #[allow(dead_code)]
     pub fn new(name: String) -> Self {
         Self {
             id: Uuid::new_v4(),

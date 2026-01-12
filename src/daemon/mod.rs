@@ -5,18 +5,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::audio::AudioPlayer;
 use crate::config::Config;
 use crate::ipc::{DaemonCommand, DaemonResponse};
 use crate::models::{PlaybackState, RepeatMode, Track};
 
-// Media key support for macOS
-#[cfg(target_os = "macos")]
-mod mediakeys;
-
 // Internal commands for the audio thread
+#[derive(Clone)]
 enum AudioCommand {
     Play(Track),
     Pause,
@@ -83,6 +80,21 @@ impl Daemon {
         thread::spawn(move || {
             playback_monitor(monitor_state, monitor_running, monitor_audio_tx);
         });
+
+        // Initialize media controls (for system media keys)
+        let media_controls = init_media_controls(Arc::clone(&state), audio_tx.clone());
+        if media_controls.is_none() {
+            warn!("Media controls not available - media keys won't work");
+        }
+
+        // Spawn media controls update thread
+        if let Some(controls) = media_controls {
+            let mc_state = Arc::clone(&state);
+            let mc_running = Arc::clone(&running);
+            thread::spawn(move || {
+                update_media_controls_loop(controls, mc_state, mc_running);
+            });
+        }
 
         // Accept connections on main thread
         while running.load(Ordering::SeqCst) {
@@ -169,6 +181,113 @@ impl Daemon {
     }
 }
 
+fn init_media_controls(
+    state: Arc<Mutex<PlaybackState>>,
+    audio_tx: Sender<AudioCommand>,
+) -> Option<souvlaki::MediaControls> {
+    use souvlaki::{MediaControlEvent, MediaControls, PlatformConfig};
+
+    #[cfg(target_os = "macos")]
+    let hwnd = None;
+
+    #[cfg(not(target_os = "macos"))]
+    let hwnd = None;
+
+    let config = PlatformConfig {
+        dbus_name: "mixyt",
+        display_name: "mixyt",
+        hwnd,
+    };
+
+    let mut controls = MediaControls::new(config).ok()?;
+
+    let state_clone = Arc::clone(&state);
+    let tx = audio_tx.clone();
+
+    controls
+        .attach(move |event: MediaControlEvent| {
+            match event {
+                MediaControlEvent::Play => {
+                    let _ = tx.send(AudioCommand::Resume);
+                }
+                MediaControlEvent::Pause => {
+                    let _ = tx.send(AudioCommand::Pause);
+                }
+                MediaControlEvent::Toggle => {
+                    let is_playing = state_clone.lock().unwrap().is_playing;
+                    if is_playing {
+                        let _ = tx.send(AudioCommand::Pause);
+                    } else {
+                        let _ = tx.send(AudioCommand::Resume);
+                    }
+                }
+                MediaControlEvent::Stop => {
+                    let _ = tx.send(AudioCommand::Stop);
+                }
+                _ => {}
+            }
+        })
+        .ok()?;
+
+    Some(controls)
+}
+
+fn update_media_controls_loop(
+    mut controls: souvlaki::MediaControls,
+    state: Arc<Mutex<PlaybackState>>,
+    running: Arc<AtomicBool>,
+) {
+    use souvlaki::{MediaMetadata, MediaPlayback};
+
+    let mut last_track_id: Option<uuid::Uuid> = None;
+    let mut last_playing: Option<bool> = None;
+
+    while running.load(Ordering::SeqCst) {
+        thread::sleep(std::time::Duration::from_millis(500));
+
+        let (current_track, is_playing) = {
+            let s = state.lock().unwrap();
+            (s.current_track.clone(), s.is_playing)
+        };
+
+        // Update playback state if changed
+        if last_playing != Some(is_playing) {
+            let playback = if is_playing {
+                MediaPlayback::Playing { progress: None }
+            } else if current_track.is_some() {
+                MediaPlayback::Paused { progress: None }
+            } else {
+                MediaPlayback::Stopped
+            };
+            let _ = controls.set_playback(playback);
+            last_playing = Some(is_playing);
+        }
+
+        // Update metadata if track changed
+        if let Some(ref track) = current_track {
+            if last_track_id != Some(track.id) {
+                let _ = controls.set_metadata(MediaMetadata {
+                    title: Some(&track.title),
+                    artist: Some("mixyt"),
+                    album: None,
+                    cover_url: None,
+                    duration: Some(std::time::Duration::from_secs(track.duration)),
+                });
+                last_track_id = Some(track.id);
+            }
+        } else if last_track_id.is_some() {
+            let _ = controls.set_metadata(MediaMetadata {
+                title: None,
+                artist: None,
+                album: None,
+                cover_url: None,
+                duration: None,
+            });
+            last_track_id = None;
+        }
+    }
+}
+
 fn run_audio_thread(
     rx: Receiver<AudioCommand>,
     state: Arc<Mutex<PlaybackState>>,
@@ -240,7 +359,7 @@ fn playback_monitor(
     audio_tx: Sender<AudioCommand>,
 ) {
     while running.load(Ordering::SeqCst) {
-        thread::sleep(std::time::Duration::from_millis(500));
+        thread::sleep(std::time::Duration::from_secs(1));
 
         let should_check = {
             let s = state.lock().unwrap();
@@ -249,6 +368,19 @@ fn playback_monitor(
 
         if !should_check {
             continue;
+        }
+
+        // Increment position counter while playing
+        #[allow(clippy::collapsible_if)]
+        {
+            let mut s = state.lock().unwrap();
+            if s.is_playing {
+                if let Some(ref track) = s.current_track {
+                    if s.position < track.duration {
+                        s.position += 1;
+                    }
+                }
+            }
         }
 
         // Check if audio finished
@@ -260,40 +392,11 @@ fn playback_monitor(
                 .unwrap_or(false);
 
         if finished {
-            let next_track = {
-                let mut s = state.lock().unwrap();
-                let repeat = s.repeat;
-
-                if repeat == RepeatMode::One {
-                    s.current_track.clone()
-                } else if !s.queue.is_empty() {
-                    let next_idx = if s.shuffle {
-                        use std::collections::hash_map::RandomState;
-                        use std::hash::{BuildHasher, Hasher};
-                        let random = RandomState::new().build_hasher().finish() as usize;
-                        random % s.queue.len()
-                    } else {
-                        (s.queue_index + 1) % s.queue.len()
-                    };
-
-                    if !s.shuffle && next_idx == 0 && repeat == RepeatMode::Off {
-                        s.is_playing = false;
-                        s.current_track = None;
-                        None
-                    } else {
-                        s.queue_index = next_idx;
-                        Some(s.queue[next_idx].clone())
-                    }
-                } else {
-                    s.is_playing = false;
-                    s.current_track = None;
-                    None
-                }
-            };
-
-            if let Some(track) = next_track {
-                let _ = audio_tx.send(AudioCommand::Play(track));
-            }
+            let mut s = state.lock().unwrap();
+            // Track finished, stop playback
+            s.is_playing = false;
+            s.current_track = None;
+            s.position = 0;
         }
     }
 }

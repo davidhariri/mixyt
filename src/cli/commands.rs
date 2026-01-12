@@ -9,7 +9,7 @@ use crate::daemon::Daemon;
 use crate::db::Database;
 use crate::download::Downloader;
 use crate::ipc::{DaemonClient, DaemonResponse};
-use crate::models::{LibraryExport, PlaybackState, Playlist, RepeatMode, Track};
+use crate::models::{LibraryExport, PlaybackState, Track};
 
 pub struct App {
     pub config: Config,
@@ -88,26 +88,26 @@ impl App {
         }
     }
 
-    fn find_playlist(&self, name: &str) -> Result<Playlist> {
-        self.db
-            .get_playlist_by_name(name)?
-            .ok_or_else(|| anyhow::anyhow!("Playlist '{name}' not found"))
-    }
-
     // Command implementations
 
     pub fn add(&self, url: &str, alias: Option<&str>) -> Result<()> {
-        // Check if already in library
-        if let Some(existing) = self.db.get_track_by_url(url)? {
-            println!("Track already in library: {}", existing.display_name());
-            return Ok(());
-        }
-
         println!("Checking dependencies...");
         Downloader::check_dependencies()?;
 
-        println!("Downloading audio...");
         let downloader = Downloader::new(self.config.clone());
+
+        // Get canonical URL to check for duplicates
+        println!("Checking video info...");
+        let (title, canonical_url, _duration) = downloader.get_video_info(url)?;
+
+        // Check if already in library by canonical URL
+        if let Some(existing) = self.db.get_track_by_url(&canonical_url)? {
+            println!("Track already in library: {}", existing.display_name());
+            println!("Use 'mixyt remove \"{}\"' first if you want to re-add it.", title);
+            return Ok(());
+        }
+
+        println!("Downloading audio...");
         let mut track = downloader.download(url)?;
 
         if let Some(a) = alias {
@@ -187,26 +187,6 @@ impl App {
         Ok(())
     }
 
-    pub fn next(&self) -> Result<()> {
-        let client = self.ensure_daemon()?;
-        match client.next()? {
-            DaemonResponse::Ok => println!("Skipped to next track"),
-            DaemonResponse::Error(e) => bail!("{e}"),
-            _ => {}
-        }
-        Ok(())
-    }
-
-    pub fn previous(&self) -> Result<()> {
-        let client = self.ensure_daemon()?;
-        match client.previous()? {
-            DaemonResponse::Ok => println!("Went to previous track"),
-            DaemonResponse::Error(e) => bail!("{e}"),
-            _ => {}
-        }
-        Ok(())
-    }
-
     pub fn seek(&self, position: &str) -> Result<()> {
         let seconds = parse_time(position)?;
         let client = self.ensure_daemon()?;
@@ -230,13 +210,8 @@ impl App {
         Ok(())
     }
 
-    pub fn list(&self, playlist: Option<&str>) -> Result<()> {
-        let tracks = if let Some(name) = playlist {
-            let pl = self.find_playlist(name)?;
-            self.db.get_playlist_tracks(&pl.id)?
-        } else {
-            self.db.get_all_tracks()?
-        };
+    pub fn list(&self) -> Result<()> {
+        let tracks = self.db.get_all_tracks()?;
 
         if tracks.is_empty() {
             println!("No tracks found.");
@@ -311,205 +286,6 @@ impl App {
                 alias,
                 track.format_duration()
             );
-        }
-
-        Ok(())
-    }
-
-    pub fn playlist_create(&self, name: &str) -> Result<()> {
-        if self.db.get_playlist_by_name(name)?.is_some() {
-            bail!("Playlist '{name}' already exists");
-        }
-
-        let playlist = Playlist::new(name.to_string());
-        self.db.insert_playlist(&playlist)?;
-        println!("Created playlist: {name}");
-
-        Ok(())
-    }
-
-    pub fn playlist_add(&self, playlist_name: &str, query: &str) -> Result<()> {
-        let playlist = self.find_playlist(playlist_name)?;
-        let track = self.find_track(query)?;
-
-        self.db.add_track_to_playlist(&playlist.id, &track.id)?;
-        println!(
-            "Added '{}' to playlist '{}'",
-            track.display_name(),
-            playlist.name
-        );
-
-        Ok(())
-    }
-
-    pub fn playlist_remove(&self, playlist_name: &str, query: &str) -> Result<()> {
-        let playlist = self.find_playlist(playlist_name)?;
-        let track = self.find_track(query)?;
-
-        self.db
-            .remove_track_from_playlist(&playlist.id, &track.id)?;
-        println!(
-            "Removed '{}' from playlist '{}'",
-            track.display_name(),
-            playlist.name
-        );
-
-        Ok(())
-    }
-
-    pub fn playlist_delete(&self, name: &str) -> Result<()> {
-        let playlist = self.find_playlist(name)?;
-        self.db.delete_playlist(&playlist.id)?;
-        println!("Deleted playlist: {name}");
-
-        Ok(())
-    }
-
-    pub fn playlist_list(&self) -> Result<()> {
-        let playlists = self.db.get_all_playlists()?;
-
-        if playlists.is_empty() {
-            println!("No playlists. Create one with: mixyt playlist create <name>");
-            return Ok(());
-        }
-
-        println!("Playlists:\n");
-        for playlist in &playlists {
-            let count = self.db.get_playlist_track_count(&playlist.id)?;
-            println!("  {} ({} tracks)", playlist.name, count);
-        }
-
-        Ok(())
-    }
-
-    pub fn playlist_show(&self, name: &str) -> Result<()> {
-        let playlist = self.find_playlist(name)?;
-        let tracks = self.db.get_playlist_tracks(&playlist.id)?;
-
-        if tracks.is_empty() {
-            println!("Playlist '{}' is empty.", name);
-            return Ok(());
-        }
-
-        println!("Playlist '{}' ({} tracks):\n", name, tracks.len());
-        for (i, track) in tracks.iter().enumerate() {
-            println!(
-                "{:3}. {} - {}",
-                i + 1,
-                track.display_name(),
-                track.format_duration()
-            );
-        }
-
-        Ok(())
-    }
-
-    pub fn playlist_play(&self, name: &str, shuffle: bool) -> Result<()> {
-        let playlist = self.find_playlist(name)?;
-        let tracks = self.db.get_playlist_tracks(&playlist.id)?;
-
-        if tracks.is_empty() {
-            bail!("Playlist '{}' is empty", name);
-        }
-
-        let client = self.ensure_daemon()?;
-
-        if shuffle {
-            client.set_shuffle(true)?;
-        }
-
-        match client.play_queue(tracks, 0)? {
-            DaemonResponse::Ok => {
-                println!("Playing playlist: {}", name);
-            }
-            DaemonResponse::Error(e) => bail!("{e}"),
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    pub fn queue_add(&self, query: &str) -> Result<()> {
-        let track = self.find_track(query)?;
-        let client = self.ensure_daemon()?;
-
-        client.queue_add(track.clone())?;
-        println!("Added to queue: {}", track.display_name());
-
-        Ok(())
-    }
-
-    pub fn queue_list(&self) -> Result<()> {
-        let client = self.ensure_daemon()?;
-        let status = client.get_status()?;
-
-        if status.queue.is_empty() {
-            println!("Queue is empty.");
-            return Ok(());
-        }
-
-        println!("Queue ({} tracks):\n", status.queue.len());
-        for (i, track) in status.queue.iter().enumerate() {
-            let marker = if i == status.queue_index { ">" } else { " " };
-            println!(
-                "{} {:3}. {} - {}",
-                marker,
-                i + 1,
-                track.display_name(),
-                track.format_duration()
-            );
-        }
-
-        Ok(())
-    }
-
-    pub fn queue_clear(&self) -> Result<()> {
-        let client = self.ensure_daemon()?;
-        client.queue_clear()?;
-        println!("Queue cleared.");
-
-        Ok(())
-    }
-
-    pub fn shuffle(&self, mode: Option<&str>) -> Result<()> {
-        let client = self.ensure_daemon()?;
-
-        match mode {
-            Some("on") => {
-                client.set_shuffle(true)?;
-                println!("Shuffle: on");
-            }
-            Some("off") => {
-                client.set_shuffle(false)?;
-                println!("Shuffle: off");
-            }
-            None => {
-                let status = client.get_status()?;
-                let new_state = !status.shuffle;
-                client.set_shuffle(new_state)?;
-                println!("Shuffle: {}", if new_state { "on" } else { "off" });
-            }
-            Some(other) => bail!("Invalid shuffle mode: '{other}'. Use 'on' or 'off'."),
-        }
-
-        Ok(())
-    }
-
-    pub fn repeat(&self, mode: Option<RepeatMode>) -> Result<()> {
-        let client = self.ensure_daemon()?;
-
-        if let Some(m) = mode {
-            client.set_repeat(m)?;
-            println!("Repeat: {m}");
-        } else {
-            let status = client.get_status()?;
-            let new_mode = match status.repeat {
-                RepeatMode::Off => RepeatMode::All,
-                RepeatMode::All => RepeatMode::One,
-                RepeatMode::One => RepeatMode::Off,
-            };
-            client.set_repeat(new_mode)?;
-            println!("Repeat: {new_mode}");
         }
 
         Ok(())
@@ -711,14 +487,4 @@ fn print_status(status: &PlaybackState) {
     }
 
     println!("Volume: {}%", status.volume);
-    println!("Shuffle: {}", if status.shuffle { "on" } else { "off" });
-    println!("Repeat: {}", status.repeat);
-
-    if !status.queue.is_empty() {
-        println!(
-            "Queue: {} tracks (#{} current)",
-            status.queue.len(),
-            status.queue_index + 1
-        );
-    }
 }

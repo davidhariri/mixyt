@@ -100,6 +100,7 @@ impl DaemonClient {
         self.send_command(DaemonCommand::Play { track })
     }
 
+    #[allow(dead_code)]
     pub fn play_queue(&self, tracks: Vec<Track>, start_index: usize) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::PlayQueue {
             tracks,
@@ -119,10 +120,12 @@ impl DaemonClient {
         self.send_command(DaemonCommand::Stop)
     }
 
+    #[allow(dead_code)]
     pub fn next(&self) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::Next)
     }
 
+    #[allow(dead_code)]
     pub fn previous(&self) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::Previous)
     }
@@ -135,18 +138,22 @@ impl DaemonClient {
         self.send_command(DaemonCommand::SetVolume { volume })
     }
 
+    #[allow(dead_code)]
     pub fn set_shuffle(&self, enabled: bool) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::SetShuffle { enabled })
     }
 
+    #[allow(dead_code)]
     pub fn set_repeat(&self, mode: RepeatMode) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::SetRepeat { mode })
     }
 
+    #[allow(dead_code)]
     pub fn queue_add(&self, track: Track) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::QueueAdd { track })
     }
 
+    #[allow(dead_code)]
     pub fn queue_clear(&self) -> Result<DaemonResponse> {
         self.send_command(DaemonCommand::QueueClear)
     }

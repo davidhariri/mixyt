@@ -12,7 +12,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use cli::{App, Cli, Commands, DaemonCommands, PlaylistCommands, QueueCommands};
+use cli::{App, Cli, Commands, DaemonCommands};
 
 fn main() -> Result<()> {
     // Initialize logging
@@ -46,63 +46,17 @@ fn main() -> Result<()> {
         Commands::Stop => {
             app.stop()?;
         }
-        Commands::Next => {
-            app.next()?;
-        }
-        Commands::Previous => {
-            app.previous()?;
-        }
         Commands::Seek { position } => {
             app.seek(&position)?;
         }
         Commands::Volume { level } => {
             app.volume(level)?;
         }
-        Commands::List { playlist } => {
-            app.list(playlist.as_deref())?;
+        Commands::List => {
+            app.list()?;
         }
         Commands::Search { query } => {
             app.search(&query)?;
-        }
-        Commands::Playlist { command } => match command {
-            PlaylistCommands::Create { name } => {
-                app.playlist_create(&name)?;
-            }
-            PlaylistCommands::Add { playlist, query } => {
-                app.playlist_add(&playlist, &query)?;
-            }
-            PlaylistCommands::Remove { playlist, query } => {
-                app.playlist_remove(&playlist, &query)?;
-            }
-            PlaylistCommands::Delete { name } => {
-                app.playlist_delete(&name)?;
-            }
-            PlaylistCommands::List => {
-                app.playlist_list()?;
-            }
-            PlaylistCommands::Show { name } => {
-                app.playlist_show(&name)?;
-            }
-            PlaylistCommands::Play { name, shuffle } => {
-                app.playlist_play(&name, shuffle)?;
-            }
-        },
-        Commands::Queue { command } => match command {
-            QueueCommands::Add { query } => {
-                app.queue_add(&query)?;
-            }
-            QueueCommands::List => {
-                app.queue_list()?;
-            }
-            QueueCommands::Clear => {
-                app.queue_clear()?;
-            }
-        },
-        Commands::Shuffle { mode } => {
-            app.shuffle(mode.as_deref())?;
-        }
-        Commands::Repeat { mode } => {
-            app.repeat(mode)?;
         }
         Commands::Status => {
             app.status()?;
