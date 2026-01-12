@@ -22,6 +22,12 @@ fi
 
 echo "Installing mixyt for $ARCH..."
 
+# Stop daemon if running (for upgrades)
+if command -v mixyt >/dev/null 2>&1; then
+    echo "Stopping existing daemon..."
+    mixyt daemon stop 2>/dev/null || true
+fi
+
 # Get latest release URL
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ARTIFACT"
 

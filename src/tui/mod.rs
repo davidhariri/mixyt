@@ -175,6 +175,8 @@ impl Tui {
                             }
                             KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
                             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
+                            KeyCode::Left | KeyCode::Char('h') => self.seek_backward(),
+                            KeyCode::Right | KeyCode::Char('l') => self.seek_forward(),
                             KeyCode::Enter => self.play_selected(),
                             KeyCode::Char(' ') => self.toggle_or_play(),
                             KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
@@ -363,7 +365,7 @@ impl Tui {
             (format!(" {}", msg), Style::default().fg(Color::Yellow))
         } else {
             (
-                " q:Quit  /:Search  a:Add  e:Edit  ↑↓:Navigate  Enter/Space:Play  +/-:Vol"
+                " q:Quit  /:Search  a:Add  e:Edit  ↑↓:Nav  ←→:Seek  Space:Play  +/-:Vol"
                     .to_string(),
                 Style::default().fg(Color::DarkGray),
             )
@@ -439,6 +441,20 @@ impl Tui {
     fn volume_down(&mut self) {
         let vol = self.playback_state.volume.saturating_sub(5);
         let _ = self.client.set_volume(vol);
+    }
+
+    fn seek_forward(&mut self) {
+        if self.playback_state.current_track.is_some() {
+            let new_pos = self.playback_state.position + 10;
+            let _ = self.client.seek(new_pos);
+        }
+    }
+
+    fn seek_backward(&mut self) {
+        if self.playback_state.current_track.is_some() {
+            let new_pos = self.playback_state.position.saturating_sub(10);
+            let _ = self.client.seek(new_pos);
+        }
     }
 
     fn start_edit(&mut self) {
