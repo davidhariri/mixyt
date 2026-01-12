@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{Connection, Row, params};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -20,9 +20,10 @@ impl Database {
         Ok(db)
     }
 
+    #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()
-            .with_context(|| "Failed to open in-memory database")?;
+        let conn =
+            Connection::open_in_memory().with_context(|| "Failed to open in-memory database")?;
 
         let db = Self { conn };
         db.init()?;
@@ -74,7 +75,8 @@ impl Database {
             title: row.get(2)?,
             alias: row.get(3)?,
             duration: row.get::<_, i64>(4)? as u64,
-            added_at: row.get::<_, String>(5)?
+            added_at: row
+                .get::<_, String>(5)?
                 .parse::<DateTime<Utc>>()
                 .unwrap_or_default(),
             file_path: row.get(6)?,
@@ -86,7 +88,8 @@ impl Database {
         Ok(Playlist {
             id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
             name: row.get(1)?,
-            created_at: row.get::<_, String>(2)?
+            created_at: row
+                .get::<_, String>(2)?
                 .parse::<DateTime<Utc>>()
                 .unwrap_or_default(),
         })
@@ -111,10 +114,11 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_track(&self, id: &Uuid) -> Result<Option<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, alias, duration, added_at, file_path, available
-             FROM tracks WHERE id = ?1"
+             FROM tracks WHERE id = ?1",
         )?;
 
         let track = stmt.query_row([id.to_string()], Self::row_to_track).ok();
@@ -124,7 +128,7 @@ impl Database {
     pub fn get_track_by_url(&self, url: &str) -> Result<Option<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, alias, duration, added_at, file_path, available
-             FROM tracks WHERE url = ?1"
+             FROM tracks WHERE url = ?1",
         )?;
 
         let track = stmt.query_row([url], Self::row_to_track).ok();
@@ -134,32 +138,36 @@ impl Database {
     pub fn get_all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, alias, duration, added_at, file_path, available
-             FROM tracks ORDER BY added_at DESC"
+             FROM tracks ORDER BY added_at DESC",
         )?;
 
-        let tracks = stmt.query_map([], Self::row_to_track)?
+        let tracks = stmt
+            .query_map([], Self::row_to_track)?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(tracks)
     }
 
+    #[allow(dead_code)]
     pub fn search_tracks(&self, query: &str) -> Result<Vec<Track>> {
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, alias, duration, added_at, file_path, available
              FROM tracks
              WHERE title LIKE ?1 OR alias LIKE ?1
-             ORDER BY added_at DESC"
+             ORDER BY added_at DESC",
         )?;
 
-        let tracks = stmt.query_map([&pattern], Self::row_to_track)?
+        let tracks = stmt
+            .query_map([&pattern], Self::row_to_track)?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(tracks)
     }
 
+    #[allow(dead_code)]
     pub fn update_track_alias(&self, id: &Uuid, alias: Option<&str>) -> Result<()> {
         self.conn.execute(
             "UPDATE tracks SET alias = ?1 WHERE id = ?2",
@@ -177,50 +185,52 @@ impl Database {
     }
 
     pub fn delete_track(&self, id: &Uuid) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM tracks WHERE id = ?1",
-            [id.to_string()],
-        )?;
+        self.conn
+            .execute("DELETE FROM tracks WHERE id = ?1", [id.to_string()])?;
         Ok(())
     }
 
     // Playlist operations
     pub fn insert_playlist(&self, playlist: &Playlist) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO playlists (id, name, created_at) VALUES (?1, ?2, ?3)",
-            params![
-                playlist.id.to_string(),
-                playlist.name,
-                playlist.created_at.to_rfc3339(),
-            ],
-        ).with_context(|| "Failed to insert playlist")?;
+        self.conn
+            .execute(
+                "INSERT INTO playlists (id, name, created_at) VALUES (?1, ?2, ?3)",
+                params![
+                    playlist.id.to_string(),
+                    playlist.name,
+                    playlist.created_at.to_rfc3339(),
+                ],
+            )
+            .with_context(|| "Failed to insert playlist")?;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_playlist(&self, id: &Uuid) -> Result<Option<Playlist>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, created_at FROM playlists WHERE id = ?1"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM playlists WHERE id = ?1")?;
 
         let playlist = stmt.query_row([id.to_string()], Self::row_to_playlist).ok();
         Ok(playlist)
     }
 
     pub fn get_playlist_by_name(&self, name: &str) -> Result<Option<Playlist>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, created_at FROM playlists WHERE name = ?1"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM playlists WHERE name = ?1")?;
 
         let playlist = stmt.query_row([name], Self::row_to_playlist).ok();
         Ok(playlist)
     }
 
     pub fn get_all_playlists(&self) -> Result<Vec<Playlist>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, created_at FROM playlists ORDER BY name"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM playlists ORDER BY name")?;
 
-        let playlists = stmt.query_map([], Self::row_to_playlist)?
+        let playlists = stmt
+            .query_map([], Self::row_to_playlist)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -228,10 +238,8 @@ impl Database {
     }
 
     pub fn delete_playlist(&self, id: &Uuid) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM playlists WHERE id = ?1",
-            [id.to_string()],
-        )?;
+        self.conn
+            .execute("DELETE FROM playlists WHERE id = ?1", [id.to_string()])?;
         Ok(())
     }
 
@@ -265,10 +273,11 @@ impl Database {
              FROM tracks t
              INNER JOIN playlist_tracks pt ON t.id = pt.track_id
              WHERE pt.playlist_id = ?1
-             ORDER BY pt.position"
+             ORDER BY pt.position",
         )?;
 
-        let tracks = stmt.query_map([playlist_id.to_string()], Self::row_to_track)?
+        let tracks = stmt
+            .query_map([playlist_id.to_string()], Self::row_to_track)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -276,29 +285,29 @@ impl Database {
     }
 
     pub fn get_all_playlist_tracks(&self) -> Result<Vec<PlaylistTrack>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT playlist_id, track_id, position FROM playlist_tracks"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT playlist_id, track_id, position FROM playlist_tracks")?;
 
-        let entries = stmt.query_map([], |row| {
-            Ok(PlaylistTrack {
-                playlist_id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
-                track_id: row.get::<_, String>(1)?.parse().unwrap_or_default(),
-                position: row.get(2)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let entries = stmt
+            .query_map([], |row| {
+                Ok(PlaylistTrack {
+                    playlist_id: row.get::<_, String>(0)?.parse().unwrap_or_default(),
+                    track_id: row.get::<_, String>(1)?.parse().unwrap_or_default(),
+                    position: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(entries)
     }
 
+    #[allow(dead_code)]
     pub fn get_track_count(&self) -> Result<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tracks",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 

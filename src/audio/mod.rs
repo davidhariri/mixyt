@@ -1,10 +1,10 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 pub struct AudioPlayer {
@@ -17,11 +17,10 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
     pub fn new() -> Result<Self> {
-        let (stream, stream_handle) = OutputStream::try_default()
-            .with_context(|| "Failed to open audio output device")?;
+        let (stream, stream_handle) =
+            OutputStream::try_default().with_context(|| "Failed to open audio output device")?;
 
-        let sink = Sink::try_new(&stream_handle)
-            .with_context(|| "Failed to create audio sink")?;
+        let sink = Sink::try_new(&stream_handle).with_context(|| "Failed to create audio sink")?;
 
         let volume = Arc::new(AtomicU8::new(80));
         let is_playing = Arc::new(AtomicBool::new(false));
@@ -80,18 +79,22 @@ impl AudioPlayer {
         self.sink.set_volume(vol as f32 / 100.0);
     }
 
+    #[allow(dead_code)]
     pub fn get_volume(&self) -> u8 {
         self.volume.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     pub fn is_playing(&self) -> bool {
         self.is_playing.load(Ordering::SeqCst) && !self.sink.is_paused()
     }
 
+    #[allow(dead_code)]
     pub fn is_paused(&self) -> bool {
         self.sink.is_paused()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.sink.empty()
     }
@@ -100,10 +103,12 @@ impl AudioPlayer {
         self.sink.empty() && !self.sink.is_paused()
     }
 
+    #[allow(dead_code)]
     pub fn sleep_until_end(&self) {
         self.sink.sleep_until_end();
     }
 
+    #[allow(dead_code)]
     pub fn wait_for_playback(&self, timeout: Duration) -> bool {
         let start = std::time::Instant::now();
         while !self.is_finished() {

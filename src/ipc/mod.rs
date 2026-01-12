@@ -8,18 +8,33 @@ use crate::models::{PlaybackState, RepeatMode, Track};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonCommand {
-    Play { track: Track },
-    PlayQueue { tracks: Vec<Track>, start_index: usize },
+    Play {
+        track: Track,
+    },
+    PlayQueue {
+        tracks: Vec<Track>,
+        start_index: usize,
+    },
     Pause,
     Resume,
     Stop,
     Next,
     Previous,
-    Seek { position: u64 },
-    SetVolume { volume: u8 },
-    SetShuffle { enabled: bool },
-    SetRepeat { mode: RepeatMode },
-    QueueAdd { track: Track },
+    Seek {
+        position: u64,
+    },
+    SetVolume {
+        volume: u8,
+    },
+    SetShuffle {
+        enabled: bool,
+    },
+    SetRepeat {
+        mode: RepeatMode,
+    },
+    QueueAdd {
+        track: Track,
+    },
     QueueClear,
     GetStatus,
     Shutdown,
@@ -48,15 +63,20 @@ impl DaemonClient {
     }
 
     pub fn send_command(&self, command: DaemonCommand) -> Result<DaemonResponse> {
-        use interprocess::local_socket::prelude::*;
         use interprocess::local_socket::GenericFilePath;
+        use interprocess::local_socket::prelude::*;
 
         let path = self.socket_path.as_os_str();
-        let name = path.to_fs_name::<GenericFilePath>()
+        let name = path
+            .to_fs_name::<GenericFilePath>()
             .with_context(|| "Invalid socket path")?;
 
-        let conn = interprocess::local_socket::Stream::connect(name)
-            .with_context(|| format!("Failed to connect to daemon at {}", self.socket_path.display()))?;
+        let conn = interprocess::local_socket::Stream::connect(name).with_context(|| {
+            format!(
+                "Failed to connect to daemon at {}",
+                self.socket_path.display()
+            )
+        })?;
 
         let mut writer = conn;
         let mut reader = BufReader::new(writer.try_clone()?);
@@ -81,7 +101,10 @@ impl DaemonClient {
     }
 
     pub fn play_queue(&self, tracks: Vec<Track>, start_index: usize) -> Result<DaemonResponse> {
-        self.send_command(DaemonCommand::PlayQueue { tracks, start_index })
+        self.send_command(DaemonCommand::PlayQueue {
+            tracks,
+            start_index,
+        })
     }
 
     pub fn pause(&self) -> Result<DaemonResponse> {

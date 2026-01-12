@@ -2,14 +2,14 @@ use anyhow::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Gauge},
-    Frame, Terminal,
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph},
 };
 use std::io;
 use std::time::Duration;
@@ -27,7 +27,9 @@ enum Panel {
 }
 
 pub struct Tui {
+    #[allow(dead_code)]
     config: Config,
+    #[allow(dead_code)]
     db: Database,
     client: DaemonClient,
     tracks: Vec<Track>,
@@ -97,57 +99,58 @@ impl Tui {
     fn main_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         loop {
             // Refresh playback state
-            if self.client.is_daemon_running() {
-                if let Ok(state) = self.client.get_status() {
-                    self.playback_state = state;
-                }
+            if self.client.is_daemon_running()
+                && let Ok(state) = self.client.get_status()
+            {
+                self.playback_state = state;
             }
 
             terminal.draw(|f| self.ui(f))?;
 
-            if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        if self.search_mode {
-                            match key.code {
-                                KeyCode::Esc => {
-                                    self.search_mode = false;
-                                    self.search_query.clear();
-                                }
-                                KeyCode::Enter => {
-                                    self.search_mode = false;
-                                    self.apply_search();
-                                }
-                                KeyCode::Backspace => {
-                                    self.search_query.pop();
-                                }
-                                KeyCode::Char(c) => {
-                                    self.search_query.push(c);
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            match key.code {
-                                KeyCode::Char('q') => return Ok(()),
-                                KeyCode::Char('/') => {
-                                    self.search_mode = true;
-                                }
-                                KeyCode::Tab => self.next_panel(),
-                                KeyCode::BackTab => self.prev_panel(),
-                                KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
-                                KeyCode::Down | KeyCode::Char('j') => self.select_next(),
-                                KeyCode::Enter => self.play_selected(),
-                                KeyCode::Char(' ') => self.toggle_playback(),
-                                KeyCode::Char('n') => self.next_track(),
-                                KeyCode::Char('p') => self.prev_track(),
-                                KeyCode::Char('s') => self.toggle_shuffle(),
-                                KeyCode::Char('r') => self.cycle_repeat(),
-                                KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
-                                KeyCode::Char('-') => self.volume_down(),
-                                KeyCode::Char('a') => self.add_to_queue(),
-                                _ => {}
-                            }
+            if event::poll(Duration::from_millis(250))?
+                && let Event::Key(key) = event::read()?
+            {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if self.search_mode {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.search_mode = false;
+                            self.search_query.clear();
                         }
+                        KeyCode::Enter => {
+                            self.search_mode = false;
+                            self.apply_search();
+                        }
+                        KeyCode::Backspace => {
+                            self.search_query.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            self.search_query.push(c);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('/') => {
+                            self.search_mode = true;
+                        }
+                        KeyCode::Tab => self.next_panel(),
+                        KeyCode::BackTab => self.prev_panel(),
+                        KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
+                        KeyCode::Down | KeyCode::Char('j') => self.select_next(),
+                        KeyCode::Enter => self.play_selected(),
+                        KeyCode::Char(' ') => self.toggle_playback(),
+                        KeyCode::Char('n') => self.next_track(),
+                        KeyCode::Char('p') => self.prev_track(),
+                        KeyCode::Char('s') => self.toggle_shuffle(),
+                        KeyCode::Char('r') => self.cycle_repeat(),
+                        KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
+                        KeyCode::Char('-') => self.volume_down(),
+                        KeyCode::Char('a') => self.add_to_queue(),
+                        _ => {}
                     }
                 }
             }
@@ -158,10 +161,10 @@ impl Tui {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Now playing
-                Constraint::Min(10),    // Main content
-                Constraint::Length(3),  // Controls
-                Constraint::Length(1),  // Help
+                Constraint::Length(3), // Now playing
+                Constraint::Min(10),   // Main content
+                Constraint::Length(3), // Controls
+                Constraint::Length(1), // Help
             ])
             .split(f.area());
 
@@ -180,8 +183,17 @@ impl Tui {
         f.render_widget(block, area);
 
         if let Some(track) = &self.playback_state.current_track {
-            let status = if self.playback_state.is_playing { "▶" } else { "⏸" };
-            let text = format!("{} {} - {}", status, track.display_name(), track.format_duration());
+            let status = if self.playback_state.is_playing {
+                "▶"
+            } else {
+                "⏸"
+            };
+            let text = format!(
+                "{} {} - {}",
+                status,
+                track.display_name(),
+                track.format_duration()
+            );
 
             // Progress bar
             let progress = if track.duration > 0 {
@@ -211,10 +223,7 @@ impl Tui {
     fn render_main_content(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(60),
-                Constraint::Percentage(40),
-            ])
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
 
         // Library
@@ -270,7 +279,11 @@ impl Tui {
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                let marker = if i == self.playback_state.queue_index { "▶ " } else { "  " };
+                let marker = if i == self.playback_state.queue_index {
+                    "▶ "
+                } else {
+                    "  "
+                };
                 ListItem::new(format!("{}{}", marker, t.display_name()))
             })
             .collect();
@@ -301,18 +314,24 @@ impl Tui {
             .block(playlist_block)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-        f.render_stateful_widget(playlist_list, right_chunks[1], &mut self.playlist_state.clone());
+        f.render_stateful_widget(
+            playlist_list,
+            right_chunks[1],
+            &mut self.playlist_state.clone(),
+        );
     }
 
     fn render_controls(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Controls ")
-            .borders(Borders::ALL);
+        let block = Block::default().title(" Controls ").borders(Borders::ALL);
 
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let shuffle = if self.playback_state.shuffle { "🔀" } else { "  " };
+        let shuffle = if self.playback_state.shuffle {
+            "🔀"
+        } else {
+            "  "
+        };
         let repeat = match self.playback_state.repeat {
             crate::models::RepeatMode::Off => "  ",
             crate::models::RepeatMode::One => "🔂",
@@ -321,10 +340,7 @@ impl Tui {
 
         let text = format!(
             "Volume: {}%  {} Shuffle  {} Repeat: {}",
-            self.playback_state.volume,
-            shuffle,
-            repeat,
-            self.playback_state.repeat
+            self.playback_state.volume, shuffle, repeat, self.playback_state.repeat
         );
 
         let para = Paragraph::new(text);
@@ -333,13 +349,15 @@ impl Tui {
 
     fn render_help(&self, f: &mut Frame, area: Rect) {
         let help_text = if self.search_mode {
-            format!("Search: {}█  (Enter to search, Esc to cancel)", self.search_query)
+            format!(
+                "Search: {}█  (Enter to search, Esc to cancel)",
+                self.search_query
+            )
         } else {
             "q:Quit  /:Search  Tab:Switch  ↑↓:Navigate  Enter:Play  Space:Pause  n/p:Next/Prev  s:Shuffle  r:Repeat  +/-:Volume  a:Add to queue".to_string()
         };
 
-        let help = Paragraph::new(help_text)
-            .style(Style::default().fg(Color::DarkGray));
+        let help = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray));
         f.render_widget(help, area);
     }
 
@@ -414,12 +432,14 @@ impl Tui {
             return;
         }
 
-        if let Some(i) = self.library_state.selected() {
-            if let Some(track) = self.tracks.get(i) {
-                if track.available {
-                    let _ = self.client.play(track.clone());
-                }
-            }
+        let Some(i) = self.library_state.selected() else {
+            return;
+        };
+        let Some(track) = self.tracks.get(i) else {
+            return;
+        };
+        if track.available {
+            let _ = self.client.play(track.clone());
         }
     }
 
@@ -467,10 +487,11 @@ impl Tui {
             return;
         }
 
-        if let Some(i) = self.library_state.selected() {
-            if let Some(track) = self.tracks.get(i) {
-                let _ = self.client.queue_add(track.clone());
-            }
+        let Some(i) = self.library_state.selected() else {
+            return;
+        };
+        if let Some(track) = self.tracks.get(i) {
+            let _ = self.client.queue_add(track.clone());
         }
     }
 
@@ -480,8 +501,8 @@ impl Tui {
         }
 
         // Filter tracks based on search
-        use fuzzy_matcher::skim::SkimMatcherV2;
         use fuzzy_matcher::FuzzyMatcher;
+        use fuzzy_matcher::skim::SkimMatcherV2;
 
         let matcher = SkimMatcherV2::default();
         let query = &self.search_query;
@@ -498,11 +519,7 @@ impl Tui {
                     .and_then(|a| matcher.fuzzy_match(a, query))
                     .unwrap_or(0);
                 let score = title_score.max(alias_score);
-                if score > 0 {
-                    Some((i, score))
-                } else {
-                    None
-                }
+                if score > 0 { Some((i, score)) } else { None }
             })
             .collect();
 

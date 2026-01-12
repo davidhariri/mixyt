@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
-use fuzzy_matcher::skim::SkimMatcherV2;
+use anyhow::{Context, Result, bail};
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use std::fs;
 use std::path::Path;
 
@@ -9,7 +9,7 @@ use crate::daemon::Daemon;
 use crate::db::Database;
 use crate::download::Downloader;
 use crate::ipc::{DaemonClient, DaemonResponse};
-use crate::models::{LibraryExport, Playlist, PlaybackState, RepeatMode, Track};
+use crate::models::{LibraryExport, PlaybackState, Playlist, RepeatMode, Track};
 
 pub struct App {
     pub config: Config,
@@ -21,8 +21,7 @@ impl App {
         let config = Config::load()?;
         config.ensure_dirs()?;
 
-        let db = Database::open(&config.db_path())
-            .with_context(|| "Failed to open database")?;
+        let db = Database::open(&config.db_path()).with_context(|| "Failed to open database")?;
 
         Ok(Self { config, db })
     }
@@ -154,7 +153,11 @@ impl App {
         let client = self.ensure_daemon()?;
         match client.play(track.clone())? {
             DaemonResponse::Ok => {
-                println!("Playing: {} ({})", track.display_name(), track.format_duration());
+                println!(
+                    "Playing: {} ({})",
+                    track.display_name(),
+                    track.format_duration()
+                );
             }
             DaemonResponse::Error(e) => bail!("{e}"),
             _ => {}
@@ -242,7 +245,11 @@ impl App {
 
         println!("{} tracks:\n", tracks.len());
         for (i, track) in tracks.iter().enumerate() {
-            let status = if !track.available { " [unavailable]" } else { "" };
+            let status = if !track.available {
+                " [unavailable]"
+            } else {
+                ""
+            };
             let alias = track
                 .alias
                 .as_ref()
@@ -339,7 +346,8 @@ impl App {
         let playlist = self.find_playlist(playlist_name)?;
         let track = self.find_track(query)?;
 
-        self.db.remove_track_from_playlist(&playlist.id, &track.id)?;
+        self.db
+            .remove_track_from_playlist(&playlist.id, &track.id)?;
         println!(
             "Removed '{}' from playlist '{}'",
             track.display_name(),
@@ -579,11 +587,11 @@ impl App {
     }
 
     pub fn import(&self, file: &str) -> Result<()> {
-        let content = fs::read_to_string(file)
-            .with_context(|| format!("Failed to read file: {file}"))?;
+        let content =
+            fs::read_to_string(file).with_context(|| format!("Failed to read file: {file}"))?;
 
-        let import: LibraryExport = serde_json::from_str(&content)
-            .with_context(|| "Failed to parse import file")?;
+        let import: LibraryExport =
+            serde_json::from_str(&content).with_context(|| "Failed to parse import file")?;
 
         println!("Importing {} tracks...", import.tracks.len());
 
@@ -675,7 +683,8 @@ fn parse_time(s: &str) -> Result<u64> {
         }
     }
 
-    s.parse().context("Invalid time format. Use seconds or MM:SS")
+    s.parse()
+        .context("Invalid time format. Use seconds or MM:SS")
 }
 
 fn format_duration(seconds: u64) -> String {
@@ -686,7 +695,11 @@ fn format_duration(seconds: u64) -> String {
 
 fn print_status(status: &PlaybackState) {
     if let Some(track) = &status.current_track {
-        let state = if status.is_playing { "Playing" } else { "Paused" };
+        let state = if status.is_playing {
+            "Playing"
+        } else {
+            "Paused"
+        };
         println!("{}: {}", state, track.display_name());
         println!(
             "Duration: {} / {}",

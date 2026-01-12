@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,6 +8,7 @@ use crate::models::Track;
 
 #[derive(Debug, Deserialize)]
 struct YtDlpInfo {
+    #[allow(dead_code)]
     id: String,
     title: String,
     duration: Option<f64>,
@@ -25,18 +26,16 @@ impl Downloader {
 
     pub fn check_dependencies() -> Result<()> {
         // Check yt-dlp
-        let yt_dlp = Command::new("yt-dlp")
-            .arg("--version")
-            .output();
+        let yt_dlp = Command::new("yt-dlp").arg("--version").output();
 
         if yt_dlp.is_err() {
-            bail!("yt-dlp is not installed. Please install it: https://github.com/yt-dlp/yt-dlp#installation");
+            bail!(
+                "yt-dlp is not installed. Please install it: https://github.com/yt-dlp/yt-dlp#installation"
+            );
         }
 
         // Check ffmpeg
-        let ffmpeg = Command::new("ffmpeg")
-            .arg("-version")
-            .output();
+        let ffmpeg = Command::new("ffmpeg").arg("-version").output();
 
         if ffmpeg.is_err() {
             bail!("ffmpeg is not installed. Please install it: https://ffmpeg.org/download.html");
@@ -47,12 +46,7 @@ impl Downloader {
 
     pub fn get_video_info(&self, url: &str) -> Result<(String, String, u64)> {
         let output = Command::new("yt-dlp")
-            .args([
-                "--dump-json",
-                "--no-download",
-                "--no-playlist",
-                url,
-            ])
+            .args(["--dump-json", "--no-download", "--no-playlist", url])
             .output()
             .with_context(|| "Failed to run yt-dlp")?;
 
@@ -77,7 +71,13 @@ impl Downloader {
         // Generate a safe filename
         let safe_title: String = title
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == ' ' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let safe_title = safe_title.trim();
 
@@ -85,12 +85,16 @@ impl Downloader {
 
         let output = Command::new("yt-dlp")
             .args([
-                "-x",  // Extract audio
-                "--audio-format", format,
-                "--audio-quality", "0",  // Best quality
+                "-x", // Extract audio
+                "--audio-format",
+                format,
+                "--audio-quality",
+                "0", // Best quality
                 "--no-playlist",
-                "-o", output_template.to_str().unwrap(),
-                "--print", "after_move:filepath",
+                "-o",
+                output_template.to_str().unwrap(),
+                "--print",
+                "after_move:filepath",
                 &canonical_url,
             ])
             .output()
@@ -101,15 +105,18 @@ impl Downloader {
             bail!("Download failed: {stderr}");
         }
 
-        let file_path = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let file_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if file_path.is_empty() || !Path::new(&file_path).exists() {
             // Try to find the file
             let expected_path = audio_dir.join(format!("{safe_title}.{format}"));
             if expected_path.exists() {
-                return Ok(Track::new(canonical_url, title, duration, expected_path.to_string_lossy().to_string()));
+                return Ok(Track::new(
+                    canonical_url,
+                    title,
+                    duration,
+                    expected_path.to_string_lossy().to_string(),
+                ));
             }
             bail!("Download completed but file not found");
         }
@@ -119,22 +126,20 @@ impl Downloader {
 
     pub fn check_availability(&self, url: &str) -> Result<bool> {
         let output = Command::new("yt-dlp")
-            .args([
-                "--simulate",
-                "--no-playlist",
-                url,
-            ])
+            .args(["--simulate", "--no-playlist", url])
             .output()
             .with_context(|| "Failed to check video availability")?;
 
         Ok(output.status.success())
     }
 
+    #[allow(dead_code)]
     pub fn audio_dir(&self) -> PathBuf {
         self.config.audio_dir()
     }
 }
 
+#[allow(dead_code)]
 pub fn extract_video_id(url: &str) -> Option<String> {
     // Handle various YouTube URL formats
     if url.contains("youtu.be/") {

@@ -91,12 +91,7 @@ impl Daemon {
         while running.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok(conn) => {
-                    let response = handle_connection(
-                        conn,
-                        &state,
-                        &running,
-                        &audio_tx,
-                    );
+                    let response = handle_connection(conn, &state, &running, &audio_tx);
 
                     if let Err(e) = response {
                         error!("Connection error: {e}");
@@ -261,44 +256,46 @@ fn playback_monitor(
 
         // Check if audio finished
         let (tx, rx) = mpsc::channel();
-        if audio_tx.send(AudioCommand::CheckFinished(tx)).is_ok() {
-            if let Ok(finished) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if finished {
-                    let (_repeat_mode, next_track) = {
-                        let mut s = state.lock().unwrap();
-                        let repeat = s.repeat;
+        let sent = audio_tx.send(AudioCommand::CheckFinished(tx)).is_ok();
+        let finished = sent
+            && rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .unwrap_or(false);
 
-                        if repeat == RepeatMode::One {
-                            (repeat, s.current_track.clone())
-                        } else if !s.queue.is_empty() {
-                            let next_idx = if s.shuffle {
-                                use std::collections::hash_map::RandomState;
-                                use std::hash::{BuildHasher, Hasher};
-                                let random = RandomState::new().build_hasher().finish() as usize;
-                                random % s.queue.len()
-                            } else {
-                                (s.queue_index + 1) % s.queue.len()
-                            };
+        if finished {
+            let next_track = {
+                let mut s = state.lock().unwrap();
+                let repeat = s.repeat;
 
-                            if !s.shuffle && next_idx == 0 && repeat == RepeatMode::Off {
-                                s.is_playing = false;
-                                s.current_track = None;
-                                (repeat, None)
-                            } else {
-                                s.queue_index = next_idx;
-                                (repeat, Some(s.queue[next_idx].clone()))
-                            }
-                        } else {
-                            s.is_playing = false;
-                            s.current_track = None;
-                            (repeat, None)
-                        }
+                if repeat == RepeatMode::One {
+                    s.current_track.clone()
+                } else if !s.queue.is_empty() {
+                    let next_idx = if s.shuffle {
+                        use std::collections::hash_map::RandomState;
+                        use std::hash::{BuildHasher, Hasher};
+                        let random = RandomState::new().build_hasher().finish() as usize;
+                        random % s.queue.len()
+                    } else {
+                        (s.queue_index + 1) % s.queue.len()
                     };
 
-                    if let Some(track) = next_track {
-                        let _ = audio_tx.send(AudioCommand::Play(track));
+                    if !s.shuffle && next_idx == 0 && repeat == RepeatMode::Off {
+                        s.is_playing = false;
+                        s.current_track = None;
+                        None
+                    } else {
+                        s.queue_index = next_idx;
+                        Some(s.queue[next_idx].clone())
                     }
+                } else {
+                    s.is_playing = false;
+                    s.current_track = None;
+                    None
                 }
+            };
+
+            if let Some(track) = next_track {
+                let _ = audio_tx.send(AudioCommand::Play(track));
             }
         }
     }
@@ -340,7 +337,10 @@ fn handle_command(
                 DaemonResponse::Error("Audio thread not running".to_string())
             }
         }
-        DaemonCommand::PlayQueue { tracks, start_index } => {
+        DaemonCommand::PlayQueue {
+            tracks,
+            start_index,
+        } => {
             if tracks.is_empty() {
                 return DaemonResponse::Error("Queue is empty".to_string());
             }

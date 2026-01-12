@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub storage: StorageConfig,
@@ -13,17 +13,6 @@ pub struct Config {
     pub daemon: DaemonConfig,
     #[serde(default)]
     pub playback: PlaybackConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            storage: StorageConfig::default(),
-            audio: AudioConfig::default(),
-            daemon: DaemonConfig::default(),
-            playback: PlaybackConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,22 +83,26 @@ impl Config {
         if config_path.exists() {
             let content = fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read config from {}", config_path.display()))?;
-            let config: Config = toml::from_str(&content)
-                .with_context(|| "Failed to parse config file")?;
+            let config: Config =
+                toml::from_str(&content).with_context(|| "Failed to parse config file")?;
             Ok(config)
         } else {
             Ok(Config::default())
         }
     }
 
+    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let config_dir = Self::config_dir();
-        fs::create_dir_all(&config_dir)
-            .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+        fs::create_dir_all(&config_dir).with_context(|| {
+            format!(
+                "Failed to create config directory: {}",
+                config_dir.display()
+            )
+        })?;
 
         let config_path = Self::config_path();
-        let content = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize config")?;
+        let content = toml::to_string_pretty(self).with_context(|| "Failed to serialize config")?;
 
         fs::write(&config_path, content)
             .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
@@ -138,10 +131,18 @@ impl Config {
     }
 
     pub fn ensure_dirs(&self) -> Result<()> {
-        fs::create_dir_all(self.data_dir())
-            .with_context(|| format!("Failed to create data directory: {}", self.data_dir().display()))?;
-        fs::create_dir_all(self.audio_dir())
-            .with_context(|| format!("Failed to create audio directory: {}", self.audio_dir().display()))?;
+        fs::create_dir_all(self.data_dir()).with_context(|| {
+            format!(
+                "Failed to create data directory: {}",
+                self.data_dir().display()
+            )
+        })?;
+        fs::create_dir_all(self.audio_dir()).with_context(|| {
+            format!(
+                "Failed to create audio directory: {}",
+                self.audio_dir().display()
+            )
+        })?;
         Ok(())
     }
 }
