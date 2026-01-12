@@ -151,7 +151,7 @@ impl Tui {
                             }
                             KeyCode::Enter => {
                                 self.add_mode = false;
-                                self.add_track();
+                                self.add_track(terminal)?;
                             }
                             KeyCode::Backspace => {
                                 self.add_url.pop();
@@ -488,40 +488,49 @@ impl Tui {
         self.edit_text.clear();
     }
 
-    fn add_track(&mut self) {
+    fn add_track(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> Result<()> {
         let url = self.add_url.trim().to_string();
         self.add_url.clear();
 
         if url.is_empty() {
-            return;
+            return Ok(());
         }
 
         // Check if it looks like a YouTube URL
         if !url.contains("youtube.com") && !url.contains("youtu.be") {
             self.status_message = Some("Invalid URL - must be a YouTube URL".to_string());
-            return;
+            return Ok(());
         }
 
-        self.status_message = Some("Downloading...".to_string());
+        // Show checking status and redraw
+        self.status_message = Some("Checking video info...".to_string());
+        terminal.draw(|f| self.ui(f))?;
 
-        // Download the track (this blocks the TUI briefly)
         let downloader = Downloader::new(self.config.clone());
 
         // First check if it already exists
-        match downloader.get_video_info(&url) {
+        let (title, canonical_url) = match downloader.get_video_info(&url) {
             Ok((title, canonical_url, _)) => {
                 if let Ok(Some(_)) = self.db.get_track_by_url(&canonical_url) {
                     self.status_message = Some(format!("Already in library: {}", title));
-                    return;
+                    return Ok(());
                 }
+                (title, canonical_url)
             }
             Err(e) => {
                 self.status_message = Some(format!("Error: {}", e));
-                return;
+                return Ok(());
             }
-        }
+        };
 
-        match downloader.download(&url) {
+        // Show downloading status with title and redraw
+        self.status_message = Some(format!("Downloading: {}...", title));
+        terminal.draw(|f| self.ui(f))?;
+
+        match downloader.download(&canonical_url) {
             Ok(track) => {
                 if self.db.insert_track(&track).is_ok() {
                     self.status_message = Some(format!("Added: {}", track.display_name()));
@@ -539,6 +548,8 @@ impl Tui {
                 self.status_message = Some(format!("Download failed: {}", e));
             }
         }
+
+        Ok(())
     }
 
     fn apply_search(&mut self) {
