@@ -84,6 +84,14 @@ impl AudioPlayer {
         self.volume.load(Ordering::SeqCst)
     }
 
+    pub fn seek(&self, position: Duration) -> bool {
+        self.sink.try_seek(position).is_ok()
+    }
+
+    pub fn get_position(&self) -> Duration {
+        self.sink.get_pos()
+    }
+
     #[allow(dead_code)]
     pub fn is_playing(&self) -> bool {
         self.is_playing.load(Ordering::SeqCst) && !self.sink.is_paused()

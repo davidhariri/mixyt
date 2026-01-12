@@ -20,7 +20,9 @@ enum AudioCommand {
     Resume,
     Stop,
     SetVolume(u8),
+    Seek(u64),
     CheckFinished(Sender<bool>),
+    GetPosition(Sender<u64>),
 }
 
 pub struct Daemon {
@@ -339,8 +341,18 @@ fn run_audio_thread(
                             p.set_volume(vol);
                             state.lock().unwrap().volume = vol;
                         }
+                        AudioCommand::Seek(position) => {
+                            let duration = std::time::Duration::from_secs(position);
+                            if p.seek(duration) {
+                                state.lock().unwrap().position = position;
+                            }
+                        }
                         AudioCommand::CheckFinished(response_tx) => {
                             let _ = response_tx.send(p.is_finished());
+                        }
+                        AudioCommand::GetPosition(response_tx) => {
+                            let pos = p.get_position().as_secs();
+                            let _ = response_tx.send(pos);
                         }
                     }
                 }
@@ -368,16 +380,11 @@ fn playback_monitor(
             continue;
         }
 
-        // Increment position counter while playing
-        #[allow(clippy::collapsible_if)]
-        {
-            let mut s = state.lock().unwrap();
-            if s.is_playing {
-                if let Some(ref track) = s.current_track {
-                    if s.position < track.duration {
-                        s.position += 1;
-                    }
-                }
+        // Get real position from audio player
+        let (pos_tx, pos_rx) = mpsc::channel();
+        if audio_tx.send(AudioCommand::GetPosition(pos_tx)).is_ok() {
+            if let Ok(pos) = pos_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                state.lock().unwrap().position = pos;
             }
         }
 
@@ -526,7 +533,7 @@ fn handle_command(
             }
         }
         DaemonCommand::Seek { position } => {
-            state.lock().unwrap().position = position;
+            let _ = audio_tx.send(AudioCommand::Seek(position));
             DaemonResponse::Ok
         }
         DaemonCommand::SetVolume { volume } => {

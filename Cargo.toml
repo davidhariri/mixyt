@@ -14,7 +14,7 @@ clap = { version = "4", features = ["derive", "env"] }
 rusqlite = { version = "0.32", features = ["bundled", "uuid"] }
 
 # Audio playback
-rodio = "0.19"
+rodio = "0.20"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
