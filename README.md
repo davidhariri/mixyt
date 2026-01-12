@@ -16,23 +16,21 @@ A CLI tool for saving, managing, and playing YouTube audio from the terminal.
 
 ## Installation
 
-### Prerequisites
+```bash
+curl -fsSL https://raw.githubusercontent.com/davidhariri/mixyt/main/install.sh | sh
+```
 
-You need `yt-dlp` and `ffmpeg` installed:
+You'll also need `yt-dlp` and `ffmpeg`:
 
 ```bash
 brew install yt-dlp ffmpeg
 ```
 
-### From source (recommended)
+### Alternative: From source
 
 ```bash
 cargo install --git https://github.com/davidhariri/mixyt
 ```
-
-### From releases
-
-Download the latest binary from [Releases](https://github.com/davidhariri/mixyt/releases) and add it to your PATH.
 
 ## Quick Start
 
