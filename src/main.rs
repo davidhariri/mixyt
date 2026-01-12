@@ -24,7 +24,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let app = App::new()?;
 
-    match cli.command {
+    // Default to TUI if no command given
+    let command = cli.command.unwrap_or(Commands::Tui);
+
+    match command {
         Commands::Add { url, alias } => {
             app.add(&url, alias.as_deref())?;
         }

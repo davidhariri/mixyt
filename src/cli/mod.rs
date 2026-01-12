@@ -11,7 +11,7 @@ pub use commands::*;
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]

@@ -7,8 +7,9 @@ use crossterm::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph},
 };
 use std::io;
@@ -23,7 +24,6 @@ use crate::models::{PlaybackState, Track};
 enum Panel {
     Library,
     Queue,
-    Playlists,
 }
 
 pub struct Tui {
@@ -33,11 +33,9 @@ pub struct Tui {
     db: Database,
     client: DaemonClient,
     tracks: Vec<Track>,
-    playlists: Vec<crate::models::Playlist>,
     selected_panel: Panel,
     library_state: ListState,
     queue_state: ListState,
-    playlist_state: ListState,
     playback_state: PlaybackState,
     search_query: String,
     search_mode: bool,
@@ -47,7 +45,6 @@ impl Tui {
     pub fn new(config: Config, db: Database) -> Result<Self> {
         let client = DaemonClient::new(config.socket_path());
         let tracks = db.get_all_tracks()?;
-        let playlists = db.get_all_playlists()?;
 
         let playback_state = if client.is_daemon_running() {
             client.get_status().unwrap_or_default()
@@ -65,11 +62,9 @@ impl Tui {
             db,
             client,
             tracks,
-            playlists,
             selected_panel: Panel::Library,
             library_state,
             queue_state: ListState::default(),
-            playlist_state: ListState::default(),
             playback_state,
             search_query: String::new(),
             search_mode: false,
@@ -162,39 +157,58 @@ impl Tui {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Now playing
-                Constraint::Min(10),   // Main content
-                Constraint::Length(3), // Controls
+                Constraint::Length(7), // Now playing (larger)
+                Constraint::Min(8),    // Main content
                 Constraint::Length(1), // Help
             ])
             .split(f.area());
 
         self.render_now_playing(f, chunks[0]);
         self.render_main_content(f, chunks[1]);
-        self.render_controls(f, chunks[2]);
-        self.render_help(f, chunks[3]);
+        self.render_help(f, chunks[2]);
+    }
+
+    fn format_time(seconds: u64) -> String {
+        let mins = seconds / 60;
+        let secs = seconds % 60;
+        format!("{:02}:{:02}", mins, secs)
     }
 
     fn render_now_playing(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Now Playing ")
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
 
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         if let Some(track) = &self.playback_state.current_track {
-            let status = if self.playback_state.is_playing {
-                "▶"
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Length(1), // Track title
+                    Constraint::Length(1), // Spacer
+                    Constraint::Length(1), // Progress bar
+                    Constraint::Length(1), // Time + controls
+                ])
+                .split(inner);
+
+            // Track title (centered, bold)
+            let status_icon = if self.playback_state.is_playing {
+                "▶ "
             } else {
-                "⏸"
+                "⏸ "
             };
-            let text = format!(
-                "{} {} - {}",
-                status,
-                track.display_name(),
-                track.format_duration()
-            );
+            let title = Paragraph::new(Line::from(vec![
+                Span::styled(status_icon, Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    track.display_name(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .alignment(Alignment::Center);
+            f.render_widget(title, chunks[0]);
 
             // Progress bar
             let progress = if track.duration > 0 {
@@ -203,28 +217,83 @@ impl Tui {
                 0.0
             };
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Length(1)])
-                .split(inner);
-
-            let title = Paragraph::new(text);
-            f.render_widget(title, chunks[0]);
-
             let gauge = Gauge::default()
                 .ratio(progress)
-                .gauge_style(Style::default().fg(Color::Cyan));
-            f.render_widget(gauge, chunks[1]);
+                .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
+                .label("");
+            f.render_widget(gauge, chunks[2]);
+
+            // Time display and controls
+            let current_time = Self::format_time(self.playback_state.position);
+            let total_time = Self::format_time(track.duration);
+
+            let shuffle_icon = if self.playback_state.shuffle {
+                "⤮ "
+            } else {
+                ""
+            };
+            let repeat_icon = match self.playback_state.repeat {
+                crate::models::RepeatMode::Off => "",
+                crate::models::RepeatMode::One => "⟲₁",
+                crate::models::RepeatMode::All => "⟲ ",
+            };
+
+            let time_line = Line::from(vec![
+                Span::raw(format!("{}  ", current_time)),
+                Span::styled("◀◀ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    if self.playback_state.is_playing {
+                        "⏸"
+                    } else {
+                        "▶"
+                    },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(" ▶▶", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("  {}", total_time)),
+                Span::raw("    "),
+                Span::styled(
+                    shuffle_icon,
+                    Style::default().fg(if self.playback_state.shuffle {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::styled(
+                    repeat_icon,
+                    Style::default().fg(
+                        if self.playback_state.repeat != crate::models::RepeatMode::Off {
+                            Color::Cyan
+                        } else {
+                            Color::DarkGray
+                        },
+                    ),
+                ),
+                Span::raw(format!("  Vol: {}%", self.playback_state.volume)),
+            ]);
+
+            let time_para = Paragraph::new(time_line).alignment(Alignment::Center);
+            f.render_widget(time_para, chunks[3]);
         } else {
-            let text = Paragraph::new("Nothing playing");
-            f.render_widget(text, inner);
+            // Nothing playing
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([Constraint::Min(1)])
+                .split(inner);
+
+            let text = Paragraph::new("No track playing")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center);
+            f.render_widget(text, chunks[0]);
         }
     }
 
     fn render_main_content(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
             .split(area);
 
         // Library
@@ -234,35 +303,45 @@ impl Tui {
             .border_style(if self.selected_panel == Panel::Library {
                 Style::default().fg(Color::Cyan)
             } else {
-                Style::default()
+                Style::default().fg(Color::DarkGray)
             });
 
         let items: Vec<ListItem> = self
             .tracks
             .iter()
             .map(|t| {
+                let is_current = self
+                    .playback_state
+                    .current_track
+                    .as_ref()
+                    .map(|ct| ct.id == t.id)
+                    .unwrap_or(false);
+
                 let style = if !t.available {
                     Style::default().fg(Color::DarkGray)
+                } else if is_current {
+                    Style::default().fg(Color::Cyan)
                 } else {
                     Style::default()
                 };
-                ListItem::new(format!("{} - {}", t.display_name(), t.format_duration()))
-                    .style(style)
+
+                let prefix = if is_current { "♪ " } else { "  " };
+                ListItem::new(format!(
+                    "{}{} - {}",
+                    prefix,
+                    t.display_name(),
+                    t.format_duration()
+                ))
+                .style(style)
             })
             .collect();
 
         let list = List::new(items)
             .block(library_block)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol("> ");
+            .highlight_symbol("▸ ");
 
         f.render_stateful_widget(list, chunks[0], &mut self.library_state.clone());
-
-        // Right panel (Queue or Playlists)
-        let right_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(chunks[1]);
 
         // Queue
         let queue_block = Block::default()
@@ -271,7 +350,7 @@ impl Tui {
             .border_style(if self.selected_panel == Panel::Queue {
                 Style::default().fg(Color::Cyan)
             } else {
-                Style::default()
+                Style::default().fg(Color::DarkGray)
             });
 
         let queue_items: Vec<ListItem> = self
@@ -280,12 +359,14 @@ impl Tui {
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                let marker = if i == self.playback_state.queue_index {
-                    "▶ "
+                let is_current = i == self.playback_state.queue_index;
+                let style = if is_current {
+                    Style::default().fg(Color::Cyan)
                 } else {
-                    "  "
+                    Style::default()
                 };
-                ListItem::new(format!("{}{}", marker, t.display_name()))
+                let marker = if is_current { "▶ " } else { "  " };
+                ListItem::new(format!("{}{}", marker, t.display_name())).style(style)
             })
             .collect();
 
@@ -293,69 +374,17 @@ impl Tui {
             .block(queue_block)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-        f.render_stateful_widget(queue_list, right_chunks[0], &mut self.queue_state.clone());
-
-        // Playlists
-        let playlist_block = Block::default()
-            .title(format!(" Playlists ({}) ", self.playlists.len()))
-            .borders(Borders::ALL)
-            .border_style(if self.selected_panel == Panel::Playlists {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default()
-            });
-
-        let playlist_items: Vec<ListItem> = self
-            .playlists
-            .iter()
-            .map(|p| ListItem::new(p.name.clone()))
-            .collect();
-
-        let playlist_list = List::new(playlist_items)
-            .block(playlist_block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-
-        f.render_stateful_widget(
-            playlist_list,
-            right_chunks[1],
-            &mut self.playlist_state.clone(),
-        );
-    }
-
-    fn render_controls(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().title(" Controls ").borders(Borders::ALL);
-
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
-        let shuffle = if self.playback_state.shuffle {
-            "🔀"
-        } else {
-            "  "
-        };
-        let repeat = match self.playback_state.repeat {
-            crate::models::RepeatMode::Off => "  ",
-            crate::models::RepeatMode::One => "🔂",
-            crate::models::RepeatMode::All => "🔁",
-        };
-
-        let text = format!(
-            "Volume: {}%  {} Shuffle  {} Repeat: {}",
-            self.playback_state.volume, shuffle, repeat, self.playback_state.repeat
-        );
-
-        let para = Paragraph::new(text);
-        f.render_widget(para, inner);
+        f.render_stateful_widget(queue_list, chunks[1], &mut self.queue_state.clone());
     }
 
     fn render_help(&self, f: &mut Frame, area: Rect) {
         let help_text = if self.search_mode {
             format!(
-                "Search: {}█  (Enter to search, Esc to cancel)",
+                " Search: {}▌  (Enter to search, Esc to cancel)",
                 self.search_query
             )
         } else {
-            "q:Quit  /:Search  Tab:Switch  ↑↓:Navigate  Enter:Play  Space:Pause  n/p:Next/Prev  s:Shuffle  r:Repeat  +/-:Volume  a:Add to queue".to_string()
+            " q:Quit  /:Search  Tab:Panel  ↑↓:Navigate  Enter:Play  Space:Pause  n/p:Skip  s:Shuffle  r:Repeat  +/-:Vol  a:Queue".to_string()
         };
 
         let help = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray));
@@ -365,24 +394,18 @@ impl Tui {
     fn next_panel(&mut self) {
         self.selected_panel = match self.selected_panel {
             Panel::Library => Panel::Queue,
-            Panel::Queue => Panel::Playlists,
-            Panel::Playlists => Panel::Library,
+            Panel::Queue => Panel::Library,
         };
     }
 
     fn prev_panel(&mut self) {
-        self.selected_panel = match self.selected_panel {
-            Panel::Library => Panel::Playlists,
-            Panel::Queue => Panel::Library,
-            Panel::Playlists => Panel::Queue,
-        };
+        self.next_panel(); // Only two panels now
     }
 
     fn current_list_state(&mut self) -> &mut ListState {
         match self.selected_panel {
             Panel::Library => &mut self.library_state,
             Panel::Queue => &mut self.queue_state,
-            Panel::Playlists => &mut self.playlist_state,
         }
     }
 
@@ -390,7 +413,6 @@ impl Tui {
         match self.selected_panel {
             Panel::Library => self.tracks.len(),
             Panel::Queue => self.playback_state.queue.len(),
-            Panel::Playlists => self.playlists.len(),
         }
     }
 
@@ -501,7 +523,6 @@ impl Tui {
             return;
         }
 
-        // Filter tracks based on search
         use fuzzy_matcher::FuzzyMatcher;
         use fuzzy_matcher::skim::SkimMatcherV2;
 

@@ -36,16 +36,13 @@ cargo install --git https://github.com/davidhariri/mixyt
 
 ```bash
 # Add a track
-mixyt add "https://www.youtube.com/watch?v=jfKfPfyJRdk"
+mixyt add "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Play it (fuzzy search)
+# Open the player (TUI is the default)
+mixyt
+
+# Or play directly from command line
 mixyt play lofi
-
-# See what's playing
-mixyt status
-
-# Launch the TUI
-mixyt tui
 ```
 
 ## Usage
