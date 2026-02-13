@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::daemon::Daemon;
 use crate::db::Database;
-use crate::download::Downloader;
+use crate::download::{DownloadPhase, Downloader};
 use crate::ipc::{DaemonClient, DaemonResponse};
 use crate::models::{LibraryExport, PlaybackState, Track};
 
@@ -110,8 +110,16 @@ impl App {
             return Ok(());
         }
 
-        println!("Downloading audio...");
-        let mut track = downloader.download(url)?;
+        eprintln!("Downloading audio...");
+        let mut track = downloader.download(url, |phase| match phase {
+            DownloadPhase::Downloading { percent, speed, eta } => {
+                eprint!("\r  [{:5.1}%] {} ETA {}    ", percent, speed, eta);
+            }
+            DownloadPhase::Converting => {
+                eprint!("\r  Converting audio...          \n");
+            }
+        })?;
+        eprintln!();
 
         if let Some(a) = alias {
             track.alias = Some(a.to_string());

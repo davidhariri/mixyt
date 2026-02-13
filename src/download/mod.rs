@@ -1,10 +1,16 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use std::io::{BufRead, BufReader, Read as _};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::config::Config;
 use crate::models::Track;
+
+pub enum DownloadPhase {
+    Downloading { percent: f64, speed: String, eta: String },
+    Converting,
+}
 
 #[derive(Debug, Deserialize)]
 struct YtDlpInfo {
@@ -62,7 +68,7 @@ impl Downloader {
         Ok((info.title, info.webpage_url, duration))
     }
 
-    pub fn download(&self, url: &str) -> Result<Track> {
+    pub fn download(&self, url: &str, on_progress: impl Fn(DownloadPhase)) -> Result<Track> {
         let (title, canonical_url, duration) = self.get_video_info(url)?;
 
         let audio_dir = self.config.audio_dir();
@@ -83,7 +89,7 @@ impl Downloader {
 
         let output_template = audio_dir.join(format!("{safe_title}.%(ext)s"));
 
-        let output = Command::new("yt-dlp")
+        let mut child = Command::new("yt-dlp")
             .args([
                 "-x", // Extract audio
                 "--audio-format",
@@ -91,21 +97,67 @@ impl Downloader {
                 "--audio-quality",
                 "0", // Best quality
                 "--no-playlist",
+                "--progress",
+                "--newline",
+                "--progress-template",
+                "download:PROGRESS:%(progress._percent_str)s:%(progress._speed_str)s:%(progress._eta_str)s",
+                "--progress-template",
+                "postprocess:POSTPROCESS",
                 "-o",
                 output_template.to_str().unwrap(),
                 "--print",
                 "after_move:filepath",
                 &canonical_url,
             ])
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| "Failed to run yt-dlp")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Download failed: {stderr}");
+        let stderr = child.stderr.take().unwrap();
+        let reader = BufReader::new(stderr);
+        let mut stderr_output = String::new();
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+
+            if let Some(rest) = line.strip_prefix("PROGRESS:") {
+                let parts: Vec<&str> = rest.splitn(3, ':').collect();
+                if parts.len() == 3 {
+                    let percent = parts[0]
+                        .trim()
+                        .trim_end_matches('%')
+                        .parse::<f64>()
+                        .unwrap_or(0.0);
+                    let speed = parts[1].trim().to_string();
+                    let eta = parts[2].trim().to_string();
+                    on_progress(DownloadPhase::Downloading { percent, speed, eta });
+                }
+            } else if line.starts_with("POSTPROCESS") {
+                on_progress(DownloadPhase::Converting);
+            } else {
+                stderr_output.push_str(&line);
+                stderr_output.push('\n');
+            }
         }
 
-        let file_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // stderr EOF — process has finished writing, read stdout and wait
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stdout_str = String::new();
+        stdout
+            .read_to_string(&mut stdout_str)
+            .with_context(|| "Failed to read yt-dlp output")?;
+
+        let status = child.wait().with_context(|| "yt-dlp process failed")?;
+
+        if !status.success() {
+            bail!("Download failed: {}", stderr_output.trim());
+        }
+
+        let file_path = stdout_str.trim().to_string();
 
         if file_path.is_empty() || !Path::new(&file_path).exists() {
             // Try to find the file

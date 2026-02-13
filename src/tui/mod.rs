@@ -13,13 +13,20 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph},
 };
 use std::io;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::download::Downloader;
+use crate::download::{DownloadPhase, Downloader};
 use crate::ipc::DaemonClient;
 use crate::models::{PlaybackState, Track};
+
+enum DownloadUpdate {
+    Status(String),
+    Progress(DownloadPhase),
+    Done(Result<Track, String>),
+}
 
 pub struct Tui {
     config: Config,
@@ -35,6 +42,7 @@ pub struct Tui {
     add_mode: bool,
     add_url: String,
     status_message: Option<String>,
+    download_rx: Option<mpsc::Receiver<DownloadUpdate>>,
 }
 
 impl Tui {
@@ -67,6 +75,7 @@ impl Tui {
             add_mode: false,
             add_url: String::new(),
             status_message: None,
+            download_rx: None,
         })
     }
 
@@ -97,6 +106,50 @@ impl Tui {
             if self.client.is_daemon_running() {
                 if let Ok(state) = self.client.get_status() {
                     self.playback_state = state;
+                }
+            }
+
+            // Poll for download progress updates
+            if let Some(rx) = &self.download_rx {
+                match rx.try_recv() {
+                    Ok(DownloadUpdate::Status(msg)) => {
+                        self.status_message = Some(msg);
+                    }
+                    Ok(DownloadUpdate::Progress(phase)) => match phase {
+                        DownloadPhase::Downloading { percent, speed, eta } => {
+                            self.status_message =
+                                Some(format!("Downloading: {:.1}% ({}, ETA {})", percent, speed, eta));
+                        }
+                        DownloadPhase::Converting => {
+                            self.status_message = Some("Converting audio...".to_string());
+                        }
+                    },
+                    Ok(DownloadUpdate::Done(result)) => {
+                        match result {
+                            Ok(track) => {
+                                if self.db.insert_track(&track).is_ok() {
+                                    self.status_message =
+                                        Some(format!("Added: {}", track.display_name()));
+                                    if let Ok(tracks) = self.db.get_all_tracks() {
+                                        self.tracks = tracks;
+                                        self.library_state.select(Some(0));
+                                    }
+                                } else {
+                                    self.status_message =
+                                        Some("Failed to save track".to_string());
+                                }
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Download failed: {}", e));
+                            }
+                        }
+                        self.download_rx = None;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.status_message = Some("Download thread terminated unexpectedly".to_string());
+                        self.download_rx = None;
+                    }
                 }
             }
 
@@ -151,7 +204,7 @@ impl Tui {
                             }
                             KeyCode::Enter => {
                                 self.add_mode = false;
-                                self.add_track(terminal)?;
+                                self.add_track();
                             }
                             KeyCode::Backspace => {
                                 self.add_url.pop();
@@ -170,7 +223,7 @@ impl Tui {
                                 self.search_mode = true;
                             }
                             KeyCode::Char('e') => self.start_edit(),
-                            KeyCode::Char('a') => {
+                            KeyCode::Char('a') if self.download_rx.is_none() => {
                                 self.add_mode = true;
                             }
                             KeyCode::Up | KeyCode::Char('k') => self.select_prev(),
@@ -501,65 +554,64 @@ impl Tui {
         self.edit_text.clear();
     }
 
-    fn add_track(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    fn add_track(&mut self) {
         let url = self.add_url.trim().to_string();
         self.add_url.clear();
 
         if url.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Check if it looks like a YouTube URL
         if !url.contains("youtube.com") && !url.contains("youtu.be") {
             self.status_message = Some("Invalid URL - must be a YouTube URL".to_string());
-            return Ok(());
+            return;
         }
 
-        // Show checking status and redraw
+        let (tx, rx) = mpsc::channel();
+        self.download_rx = Some(rx);
         self.status_message = Some("Checking video info...".to_string());
-        terminal.draw(|f| self.ui(f))?;
 
-        let downloader = Downloader::new(self.config.clone());
+        let config = self.config.clone();
+        let db_path = config.db_path();
 
-        // First check if it already exists
-        let (title, canonical_url) = match downloader.get_video_info(&url) {
-            Ok((title, canonical_url, _)) => {
-                if let Ok(Some(_)) = self.db.get_track_by_url(&canonical_url) {
-                    self.status_message = Some(format!("Already in library: {}", title));
-                    return Ok(());
-                }
-                (title, canonical_url)
-            }
-            Err(e) => {
-                self.status_message = Some(format!("Error: {}", e));
-                return Ok(());
-            }
-        };
+        std::thread::spawn(move || {
+            let downloader = Downloader::new(config);
 
-        // Show downloading status with title and redraw
-        self.status_message = Some(format!("Downloading: {}...", title));
-        terminal.draw(|f| self.ui(f))?;
-
-        match downloader.download(&canonical_url) {
-            Ok(track) => {
-                if self.db.insert_track(&track).is_ok() {
-                    self.status_message = Some(format!("Added: {}", track.display_name()));
-                    // Refresh tracks list
-                    if let Ok(tracks) = self.db.get_all_tracks() {
-                        self.tracks = tracks;
-                        // Select the newly added track (it's at the top since sorted by added_at DESC)
-                        self.library_state.select(Some(0));
+            // Get video info and check for duplicates
+            let canonical_url = match downloader.get_video_info(&url) {
+                Ok((title, canonical_url, _)) => {
+                    // Open a separate DB connection for the duplicate check
+                    if let Ok(db) = Database::open(&db_path)
+                        && let Ok(Some(_)) = db.get_track_by_url(&canonical_url)
+                    {
+                        let _ = tx.send(DownloadUpdate::Done(Err(format!(
+                            "Already in library: {}",
+                            title
+                        ))));
+                        return;
                     }
-                } else {
-                    self.status_message = Some("Failed to save track".to_string());
+                    let _ = tx.send(DownloadUpdate::Status(format!("Downloading: {}...", title)));
+                    canonical_url
+                }
+                Err(e) => {
+                    let _ = tx.send(DownloadUpdate::Done(Err(format!("{}", e))));
+                    return;
+                }
+            };
+
+            let tx_progress = tx.clone();
+            match downloader.download(&canonical_url, move |phase| {
+                let _ = tx_progress.send(DownloadUpdate::Progress(phase));
+            }) {
+                Ok(track) => {
+                    let _ = tx.send(DownloadUpdate::Done(Ok(track)));
+                }
+                Err(e) => {
+                    let _ = tx.send(DownloadUpdate::Done(Err(format!("{}", e))));
                 }
             }
-            Err(e) => {
-                self.status_message = Some(format!("Download failed: {}", e));
-            }
-        }
-
-        Ok(())
+        });
     }
 
     fn apply_search(&mut self) {
